@@ -5,7 +5,9 @@ import numpy as np
 
 def plot(data, ax=None, **kwargs):
     """
-    Plot quantized function.
+    Plot quantized function. Good colormap arguments:
+    - `cmap='seismic'` for bright plots (this is default)
+    - `cmap='twilight'` for dark plots
 
     Parameters
     ----------
