@@ -203,17 +203,6 @@ def mat2shr_(W, basis, omega_out):
     N = W.shape[0]
     basis_break_indices = np.hstack((np.array([0]), (np.arange(N, 0, -1)**2).cumsum()))
 
-    # # m=0
-    # omega_real[elm2ind(el, 0)] = omega_complex[elm2ind(el, 0)].real
-    #
-    # # Negative m
-    # ms = np.arange(-el, 0)
-    # omega_real[elm2ind(el, ms)] = np.sqrt(2) * (-1)**(-ms) * omega_complex[elm2ind(el, -ms)].imag
-    #
-    # # Positive m
-    # ms = np.arange(1, el + 1)
-    # omega_real[elm2ind(el, ms)] = np.sqrt(2) * (-1)**ms * omega_complex[elm2ind(el, ms)].real
-
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]

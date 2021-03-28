@@ -1,6 +1,7 @@
 import numpy as np
 import pyssht
 from .utils import elm2ind
+from .quantization import mat2shr, mat2shc
 
 
 def fun2shc(f):
@@ -69,7 +70,7 @@ def shc2fun(omega, isreal=False, N=-1):
             omega = omega[:N**2]
 
     # Make sure things are ok
-    assert omega.shape[0] == N**2, "It seems that omegacomplex does not have the right length."
+    assert omega.shape[0] == N**2, "It seems that omega does not have the right length."
 
     # Transform to function values
     f = pyssht.inverse(omega, N, Reality=isreal)
@@ -245,3 +246,50 @@ def shr2fun(omega, N=-1):
     f: ndarray, shape (N, 2*N-1)
     """
     return shc2fun(shr2shc(omega), isreal=True, N=N)
+
+
+def as_fun(data, N=-1):
+    """
+    Take data as either `fun`, `img`, `omegar`, `omegac`, or `mat`
+    and convert to `fun` (unless already).
+
+    Parameters
+    ----------
+    data: ndarray
+    N: bandwidth (optional)
+
+    Returns
+    -------
+    fun: ndarray(shape=(N, 2*N-1), dtype=float or complex)
+    """
+    if data.ndim == 2:
+        if data.shape[0] == data.shape[1] and np.iscomplexobj(data):
+            # Format is mat
+            W = data
+            if N == -1:
+                N = W.shape[0]
+            if np.allclose(W, -W.conj().T):
+                fun = shr2fun(mat2shr(W), N)
+            else:
+                fun = shc2fun(mat2shc(W), N)
+        else:
+            # Format is fun or img
+            if data.dtype == np.uint8:
+                # Format is img
+                img = data
+                fun = img2fun(img)
+            else:
+                # Format is fun
+                fun = data
+    else:
+        # Format is omegar or omegac
+        if np.iscomplexobj(data):
+            # Format is omegac
+            omegac = data
+            fun = shc2fun(omegac) if N == -1 else shc2fun(omegac, N)
+        else:
+            # Format is omegar
+            omegar = data
+            fun = shr2fun(omegar) if N == -1 else shr2fun(omegar, N)
+
+    return fun
