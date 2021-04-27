@@ -455,3 +455,62 @@ def mat2shc(W):
     mat2shc_(W, basis, omega)
 
     return omega
+
+
+def save(filename, data, qu_type="shr"):
+    """
+    Save `data` in HDF5 file `filename`. The HDF5 file is created if
+    it does not exist already.
+    The data is stored in format `qu_type` which defaults to `shr`.
+
+    Parameters
+    ----------
+    filename: str
+    data: ndarray
+    qu_type: str
+    """
+    with h5py.File(filename, "a") as f:
+        if qu_type == "shr":
+            from .transforms import as_shr
+            omegar = as_shr(data)
+            datapath = "omegar"
+            if datapath not in f:
+                dset = f.create_dataset(datapath, (1,)+omegar.shape,
+                                        dtype=omegar.dtype,
+                                        maxshape=(None,)+omegar.shape
+                                        )
+                dset.attrs["N"] = round(np.sqrt(omegar.shape[0]))
+                dset.attrs["qu_type"] = "shr"
+            elif f[datapath].shape[-1] != omegar.shape[0] or f[datapath].ndim != 2:
+                raise ValueError("The file qu_type does not seem to be correct.")
+            else:
+                dset = f[datapath]
+            dset.resize((dset.shape[0]+1,) + (dset.shape[1],))
+            dset[-1, :] = omegar
+        else:
+            raise ValueError("Format %s is not supported yet."%qu_type)
+
+
+def load(filename, qu_type="shr"):
+    """
+    Load data saved in either MATLAB or HDF5 format.
+
+    Parameters
+    ----------
+    filename: str
+    qu_type: str
+
+    Returns
+    -------
+    data: h5py.Dataset or ndarray
+    """
+    if filename[-4:] == "hdf5":
+        f = h5py.File(filename, "r")
+        if qu_type == "shr":
+            return f["omegar"]
+        else:
+            raise ValueError("Format %s is not supported yet." % qu_type)
+    elif filename[-3:] == "mat":
+        from scipy.io import loadmat
+        W = np.squeeze(loadmat(filename)['W0'])
+        return W
