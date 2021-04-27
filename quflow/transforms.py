@@ -183,7 +183,7 @@ def fun2img(f, lim=np.infty):
     fscale = 255*(f-lim[0])/(lim[1]-lim[0])
     fscale[np.where(fscale < 0)] = 0
     fscale[np.where(fscale > 255)] = 255
-    img = fscale.astype(np.unit8)
+    img = fscale.astype(np.uint8)
 
     return img
 
@@ -293,3 +293,47 @@ def as_fun(data, N=-1):
             fun = shr2fun(omegar) if N == -1 else shr2fun(omegar, N)
 
     return fun
+
+
+def as_shr(data):
+    """
+    Take data as either `fun`, `img`, `omegar`, `omegac`, or `mat`
+    and convert to `omegar` (unless already).
+
+    Parameters
+    ----------
+    data: ndarray
+
+    Returns
+    -------
+    omegar: ndarray(shape=(N**2,), dtype=float)
+    """
+    if data.ndim == 2:
+        if data.shape[0] == data.shape[1] and np.iscomplexobj(data):
+            # Format is mat
+            W = data
+            N = W.shape[0]
+            if N == -1:
+                N = W.shape[0]
+            omegar = mat2shr(W)
+        else:
+            # Format is fun or img
+            if data.dtype == np.uint8:
+                # Format is img
+                img = data
+                fun = img2fun(img)
+            else:
+                # Format is fun
+                fun = data
+            omegar = fun2shr(fun)
+    else:
+        # Format is omegar or omegac
+        if np.iscomplexobj(data):
+            # Format is omegac
+            omegac = data
+            omegar = shc2shr(omegac)
+        else:
+            # Format is omegar
+            omegar = data
+
+    return omegar
