@@ -13,7 +13,7 @@ setup_args = {
     'long_description': readme,
     'long_description_content_type': 'text/markdown',
     'package_dir': {'quflow': 'quflow'},
-    'packages': ['quflow',],
+    'packages': ['quflow', ],
     'version': '0.0.1',
     'include_package_data': True,
     'test_suite': 'pytest',

@@ -50,7 +50,7 @@ def compute_sparse_laplacian_alt(N):
 
 
 @njit
-def compute_sparse_laplacian_ind_(N, values, ivals, jvals):
+def compute_sparse_laplacian_ind_(N, values, ivals, jvals, bc=True):
     s = (N - 1)/2
     mvals = np.linspace(-s, s, N)
     count = 0
@@ -80,77 +80,34 @@ def compute_sparse_laplacian_ind_(N, values, ivals, jvals):
                     count += 1
 
     # Make sure matrix is invertible (corresponds to adding BC in Poisson equations)
-    for h in range(N):
-        ivals[count] = 0
-        jvals[count] = h*(N+1)
-        values[count] = -1/N
-        count += 1
-
-    # MATLAB CODE
-    # s = (N-1)/2;
-    # k = s+1;
-    #
-    # V = zeros(3*N^2-4*N+2+N,1);
-    # I = V;
-    # J = V;
-    # count = 1;
-    #
-    # for M1=-s:s
-    #     for M2=-s:s
-    #
-    #         coeff1 = 2*(s*(s+1)-M1*M2);
-    #         I(count) = (M1+k-1)*N + M2+k;
-    #         J(count) = (M1+k-1)*N + M2+k;
-    #         V(count) = -coeff1;
-    #         count = count + 1;
-    #
-    #         if M1<s && M2<s
-    #         coeff2 = -sqrt(s*(s+1)-M1*(M1+1))*sqrt(s*(s+1)-M2*(M2+1));
-    #         I(count) = (M1+k-1)*N + M2+k;
-    #         J(count) = (M1+k)*N + M2+k+1;
-    #         V(count) = -coeff2;
-    #         count = count + 1;
-    #         end
-    #
-    #         if M1>-s && M2>-s
-    #         coeff3 = -sqrt(s*(s+1)-M1*(M1-1))*sqrt(s*(s+1)-M2*(M2-1));
-    #         I(count) = (M1+k-1)*N + M2+k;
-    #         J(count) = (M1+k-2)*N + M2+k-1;
-    #         V(count) = -coeff3;
-    #         count = count + 1;
-    #         end
-    #
-    #     end
-    # end
-    #
-    # for h=0:N-1
-    #         I(count) = 1;
-    #         J(count) = 1+h*(N+1);
-    #         V(count) = -1/N;
-    #         count = count + 1;
-    # end
-    #
-    # DL = sparse(I,J,V,N^2,N^2);
+    if bc:
+        for h in range(N):
+            ivals[count] = 0
+            jvals[count] = h*(N+1)
+            values[count] = -1/N
+            count += 1
 
 
-def compute_sparse_laplacian(N):
+def compute_sparse_laplacian(N, bc=True):
     """
     Return the sparse laplacian for a specific bandwidth `N`.
 
     Parameters
     ----------
     N: int
+    bc: bool
+        Whether to add conditions to exclude singular matrix.
 
     Returns
     -------
     A: scipy.sparse.spmatrix
         Sparse matrix in some scipy format (typically `csc_matrix`).
     """
-    values = np.zeros(3*N**2-4*N+2+N, dtype=complex)
+    values = np.zeros(3*N**2-4*N+2+N, dtype=float)  # Used to be 'complex' but no need for that
     ivals = np.zeros(values.shape, dtype=int)
     jvals = np.zeros(values.shape, dtype=int)
 
-    compute_sparse_laplacian_ind_(N, values, ivals, jvals)
+    compute_sparse_laplacian_ind_(N, values, ivals, jvals, bc=bc)
 
     # Create sparse matrix
     from scipy.sparse import coo_matrix

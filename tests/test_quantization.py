@@ -13,6 +13,15 @@ def get_random_mat(N=5):
     return W
 
 
+@pytest.mark.parametrize("N", [33, 65, 513])
+def test_compute_basis(N):
+    basis = qf.get_basis(N, allow_compute=False)
+
+    basis_computed = qf.compute_basis(N)
+
+    assert np.abs(basis-basis_computed).max() < 1e-10
+
+
 @pytest.mark.parametrize("omega", [get_random_omega_real(), get_random_omega_real(17)])
 def test_shr2mat_(omega):
     N = round(np.sqrt(omega.shape[0]))

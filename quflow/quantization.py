@@ -1,11 +1,13 @@
 import numpy as np
 from scipy.io import loadmat
 from .utils import elm2ind
-from numba import njit
+from .dynamics import compute_sparse_laplacian
+from numba import njit, prange
 import os
 import os.path
 import h5py
 import appdirs
+from scipy.linalg import eigh
 
 # ----------------
 # GLOBAL VARIABLES
@@ -22,7 +24,7 @@ _basis_path_default = appdirs.user_data_dir(_app_name, False)
 #     Win 7/10:     C:\Users\<username>\AppData\Local\<AppAuthor>\<AppName>
 
 _basis_filename_default = "quflow_basis.hdf5"
-_save_computed_basis_default = True
+_save_computed_basis_default = False
 
 _file_version = 0.1
 _basis_cache = dict()
@@ -144,8 +146,80 @@ def convert_mat_to_hdf5_basis(filename_mat, filename_hdf5=None):
     save_basis_hdf5(filename_hdf5, basis)
 
 
+@njit
+def adjust_basis_orientation_(w2, m, tol=1e-16):
+    """
+    Adjust (inline) the sign of the eigenbasis `w2` so that it corresponds
+    to standard spherical harmonics.
+    """
+    for i in range(w2.shape[1]):
+        val = w2[-1, i]
+        if val < 0:
+            w2[:, i] *= (-1)*(-1 if m % 2 == 1 else 1)
+        elif val == 0.0:
+            for j in range(2, w2.shape[0]):
+                if np.abs(w2[-j, i]) > tol and np.abs(w2[-j-1, i]) > tol:
+                    prev_sign = np.sign(w2[-j-1, i])
+                    this_sign = np.sign(w2[-j, i])
+                    if this_sign*prev_sign == -1:
+                        w2[:, i] *= this_sign*(-1 if m % 2 == 1 else 1)*(-1 if j % 2 == 0 else 1)
+                    else:
+                        w2[:, i] *= this_sign*(-1 if m % 2 == 1 else 1)
+                    break
+        else:
+            w2[:, i] *= (-1 if m % 2 == 1 else 1)
+
+
+@njit
+def get_m_laplacians_(kki, lli, llj, data, N, basis_break_indices, laplace_out):
+    for k in range(data.shape[0]):
+        v = data[k]
+        ki = kki[k]
+        li = lli[k]
+        lj = llj[k]
+        m = ki-li
+        if m >= 0:
+            bind0 = basis_break_indices[m]
+            bind1 = basis_break_indices[m+1]
+            laplace_out[bind0+li*(N-m)+lj] = v
+
+
 def compute_basis(N):
-    raise NotImplementedError("Basis computation implementation still lacking.")
+    """
+    Compute quantization basis.
+
+    Parameters
+    ----------
+    N: int
+
+    Returns
+    -------
+    basis: ndarray
+    """
+
+    basis_break_indices = np.hstack((0, (np.arange(N, 0, -1)**2).cumsum()))
+    basis = np.zeros(basis_break_indices[-1], dtype=float)
+
+    laplacian = compute_sparse_laplacian(N, bc=False).tocoo()
+    (kki, lli) = np.unravel_index(laplacian.row, (N, N))
+    (kkj, llj) = np.unravel_index(laplacian.col, (N, N))
+    laplace_vec = np.zeros_like(basis)
+    get_m_laplacians_(kki, lli, llj, laplacian.data, N, basis_break_indices, laplace_vec)
+
+    for m in range(N):
+        bind0 = basis_break_indices[m]
+        bind1 = basis_break_indices[m+1]
+        v2, w2 = eigh(laplace_vec[bind0:bind1].reshape((N-m, N-m)))
+        w2 = w2[:, ::-1]
+
+        # The eigenvectors are only defined up to sign.
+        # Therefore, we must adjust the sign so that it corresponds with
+        # the quantization basis of Hoppe (i.e. with the spherical harmonics).
+        adjust_basis_orientation_(w2, m)
+
+        basis[bind0:bind1] = w2.ravel()
+
+    return basis
 
 
 @njit
@@ -162,6 +236,7 @@ def assign_upper_diag_(diag_m, m, W_out):
         W_out[i, i+m] = diag_m[i]
 
 
+@njit
 def shr2mat_(omega, basis, W_out):
     """
     Low-level implementation of `shr2mat`.
@@ -173,16 +248,17 @@ def shr2mat_(omega, basis, W_out):
     W_out: ndarray, dtype=complex, shape=(N,N)
     """
     N = W_out.shape[0]
-    basis_break_indices = np.hstack((0, (np.arange(N, 0, -1)**2).cumsum()))
+    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]
-        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m))
+        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(np.complex128)
 
         if m == 0:  # Diagonal
             omega_zero_ind = elm2ind(np.arange(0, N), 0)
-            diag = basis_m_mat@omega[omega_zero_ind]
+            diag = basis_m_mat@omega[omega_zero_ind].astype(np.complex128)
             assign_lower_diag_(diag, 0, W_out)
         else:
             # Lower diagonal
@@ -190,7 +266,8 @@ def shr2mat_(omega, basis, W_out):
             omega_plus_m_ind = elm2ind(np.arange(m, N), m)
             omega_complex = (1./np.sqrt(2))*(omega[omega_plus_m_ind]-1j*omega[omega_minus_m_ind])
             sgn = 1 if m % 2 == 0 else -1
-            diag_m = sgn*basis_m_mat@omega_complex
+            diag_m = basis_m_mat@omega_complex
+            diag_m *= sgn
             assign_lower_diag_(diag_m.conj(), m, W_out)
 
             # Upper diagonal
@@ -199,24 +276,26 @@ def shr2mat_(omega, basis, W_out):
     W_out *= 1.0j
 
 
+@njit
 def mat2shr_(W, basis, omega_out):
     N = W.shape[0]
-    basis_break_indices = np.hstack((np.array([0]), (np.arange(N, 0, -1)**2).cumsum()))
+    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]
-        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m))
+        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(np.complex128)
 
         if m == 0:  # Diagonal
             omega_zero_ind = elm2ind(np.arange(0, N), 0)
-            diag_m = np.diagonal(W, 0)  # np.diagonal is more efficient than np.diag, but doesn't work with njit
+            diag_m = np.diag(W, 0)  # np.diagonal is more efficient than np.diag, but doesn't work with njit
             omega_out[omega_zero_ind] = ((diag_m@basis_m_mat)/1.0j).real
 
         else:
             # Lower diagonal
             omega_pos_m_ind = elm2ind(np.arange(m, N), m)
-            diag_m = np.diagonal(W, -m)  # np.diagonal is more efficient than np.diag, but doesn't work with njit
+            diag_m = np.diag(W, -m)  # np.diagonal is more efficient than np.diag, but doesn't work with njit
             omega_partial_complex = diag_m@basis_m_mat
             sgn = 1 if m % 2 == 0 else -1
             omega_out[omega_pos_m_ind] = np.sqrt(2)*sgn*omega_partial_complex.imag
@@ -226,6 +305,7 @@ def mat2shr_(W, basis, omega_out):
             omega_out[omega_neg_m_ind] = -np.sqrt(2)*sgn*omega_partial_complex.real
 
 
+@njit
 def shc2mat_(omega, basis, W_out):
     """
     Low-level implementation of `shc2mat`.
@@ -237,12 +317,13 @@ def shc2mat_(omega, basis, W_out):
     W_out: ndarray, shape (N,N)
     """
     N = W_out.shape[0]
-    basis_break_indices = np.hstack((0, (np.arange(N, 0, -1)**2).cumsum()))
+    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]
-        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m))
+        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(np.complex128)
 
         # Lower diagonal
         omega_m_ind = elm2ind(np.arange(m, N), m)
@@ -259,24 +340,26 @@ def shc2mat_(omega, basis, W_out):
     W_out *= 1.0j
 
 
+@njit
 def mat2shc_(W, basis, omega_out):
     N = W.shape[0]
-    basis_break_indices = np.hstack((np.array([0]), (np.arange(N, 0, -1)**2).cumsum()))
+    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]
-        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m))
+        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(np.complex128)
 
         # Lower diagonal
         omega_m_ind = elm2ind(np.arange(m, N), m)
-        diag_m = np.diagonal(W, -m)  # np.diagonal is more efficient than np.diag, but doesn't work with njit
+        diag_m = np.diag(W, -m)  # np.diagonal is more efficient than np.diag, but doesn't work with njit
         omega_out[omega_m_ind] = diag_m@basis_m_mat
 
         # Upper diagonal
         if m != 0:
             omega_m_ind = elm2ind(np.arange(m, N), -m)
-            diag_m = np.diagonal(W, m)
+            diag_m = np.diag(W, m)
             sgn = 1 if m % 2 == 0 else -1
             omega_out[omega_m_ind] = sgn*diag_m@basis_m_mat
 
@@ -287,7 +370,7 @@ def mat2shc_(W, basis, omega_out):
 # HIGHER LEVEL FUNCTIONS
 # ----------------------
 
-def get_basis(N):
+def get_basis(N, allow_compute=True):
     """
     Return a quantization basis for band limit N.
     The basis is obtained as follows:
@@ -298,6 +381,9 @@ def get_basis(N):
     Parameters
     ----------
     N: int
+    allow_compute: bool, optional
+        Whether to allow computation of basis if not found elsewhere.
+        Default is `True`.
 
     Returns
     -------
@@ -340,7 +426,7 @@ def get_basis(N):
                 break
 
     # Finally, if no precomputed basis is to be found, compute it
-    if basis is None:
+    if basis is None and allow_compute:
         basis = compute_basis(N)
         if 'QUFLOW_SAVE_COMPUTED_BASIS' in os.environ:
             save_computed_basis = False if os.environ['QUFLOW_SAVE_COMPUTED_BASIS'] \
@@ -351,7 +437,8 @@ def get_basis(N):
             save_basis_hdf5(_basis_filename_default, basis)
 
     # Save basis to cache
-    _basis_cache[N] = basis
+    if basis is not None:
+        _basis_cache[N] = basis
 
     return basis
 
