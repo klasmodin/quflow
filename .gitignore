@@ -2,3 +2,5 @@
 pyspherical
 .ipynb_checkpoints
 quflow/__pycache__
+.eggs
+quflow.egg-info
