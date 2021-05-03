@@ -1,13 +1,13 @@
 import numpy as np
 from scipy.io import loadmat
 from .utils import elm2ind
-from .dynamics import compute_sparse_laplacian
+from .laplacian.sparse import compute_sparse_laplacian
 from numba import njit, prange
 import os
 import os.path
 import h5py
 import appdirs
-from scipy.linalg import eigh
+from scipy.linalg import eigh, eigh_tridiagonal
 
 # ----------------
 # GLOBAL VARIABLES
@@ -181,7 +181,7 @@ def get_m_laplacians_(kki, lli, llj, data, N, basis_break_indices, laplace_out):
         if m >= 0:
             bind0 = basis_break_indices[m]
             bind1 = basis_break_indices[m+1]
-            laplace_out[bind0+li*(N-m)+lj] = v
+            laplace_out[bind0+li*(N-m)+lj] = np.real(v)
 
 
 def compute_basis(N):
@@ -209,7 +209,10 @@ def compute_basis(N):
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]
-        v2, w2 = eigh(laplace_vec[bind0:bind1].reshape((N-m, N-m)))
+
+        Delta_m = laplace_vec[bind0:bind1].reshape((N-m, N-m))
+        # v2, w2 = eigh(Delta_m)
+        v2, w2 = eigh_tridiagonal(np.diag(Delta_m), np.diag(Delta_m, -1))
         w2 = w2[:, ::-1]
 
         # The eigenvectors are only defined up to sign.
@@ -243,7 +246,7 @@ def shr2mat_(omega, basis, W_out):
 
     Parameters
     ----------
-    omega: ndarray, dtype=float, shape=(N*(N+1)/2,)
+    omega: ndarray, dtype=float, shape=(N**2,)
     basis: ndarray, dtype=float, shape=(np.sum(np.arange(N)**2),)
     W_out: ndarray, dtype=complex, shape=(N,N)
     """
@@ -376,7 +379,7 @@ def get_basis(N, allow_compute=True):
     The basis is obtained as follows:
     - First look in memory cache.
     - Second look in storage cache.
-    - Third compute basis from scratch (this is computationally heavy).
+    - Third compute basis from scratch.
 
     Parameters
     ----------
@@ -544,20 +547,20 @@ def mat2shc(W):
     return omega
 
 
-def save(filename, data, qu_type="shr"):
+def save(filename, data, qtype="shr"):
     """
     Save `data` in HDF5 file `filename`. The HDF5 file is created if
     it does not exist already.
-    The data is stored in format `qu_type` which defaults to `shr`.
+    The data is stored in format `qtype` which defaults to `shr`.
 
     Parameters
     ----------
     filename: str
     data: ndarray
-    qu_type: str
+    qtype: str
     """
     with h5py.File(filename, "a") as f:
-        if qu_type == "shr":
+        if qtype == "shr":
             from .transforms import as_shr
             omegar = as_shr(data)
             datapath = "omegar"
@@ -567,25 +570,25 @@ def save(filename, data, qu_type="shr"):
                                         maxshape=(None,)+omegar.shape
                                         )
                 dset.attrs["N"] = round(np.sqrt(omegar.shape[0]))
-                dset.attrs["qu_type"] = "shr"
+                dset.attrs["qtype"] = "shr"
             elif f[datapath].shape[-1] != omegar.shape[0] or f[datapath].ndim != 2:
-                raise ValueError("The file qu_type does not seem to be correct.")
+                raise ValueError("The file qtype does not seem to be correct.")
             else:
                 dset = f[datapath]
             dset.resize((dset.shape[0]+1,) + (dset.shape[1],))
             dset[-1, :] = omegar
         else:
-            raise ValueError("Format %s is not supported yet."%qu_type)
+            raise ValueError("Format %s is not supported yet."%qtype)
 
 
-def load(filename, qu_type="shr"):
+def load(filename, qtype="shr"):
     """
     Load data saved in either MATLAB or HDF5 format.
 
     Parameters
     ----------
     filename: str
-    qu_type: str
+    qtype: str
 
     Returns
     -------
@@ -593,10 +596,10 @@ def load(filename, qu_type="shr"):
     """
     if filename[-4:] == "hdf5":
         f = h5py.File(filename, "r")
-        if qu_type == "shr":
+        if qtype == "shr":
             return f["omegar"]
         else:
-            raise ValueError("Format %s is not supported yet." % qu_type)
+            raise ValueError("Format %s is not supported yet." % qtype)
     elif filename[-3:] == "mat":
         from scipy.io import loadmat
         W = np.squeeze(loadmat(filename)['W0'])

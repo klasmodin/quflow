@@ -1,6 +1,7 @@
 import numpy as np
 import pyssht
 from numba import njit
+from laplacian.sparse import solve_heat
 
 
 @njit
@@ -158,13 +159,12 @@ def north_blob(N, sigma = 0):
     -------
     W: ndarray(shape=(N, N), dtype=complex)
     """
-    from .dynamics import solve_heat_flow
 
     W = np.zeros((N, N), dtype=complex)
     W[-1, -1] = 1.0j
 
     if sigma != 0:
-        W = solve_heat_flow(sigma/4., W)
+        W = solve_heat(sigma/4., W)
 
     return W
 
