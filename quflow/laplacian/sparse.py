@@ -188,12 +188,13 @@ def solve_poisson(W):
 
     if N not in _lu_laplacian_cache:
         # Get sparse laplacian
-        A = laplacian(N, True)
+        A = laplacian(N, bc=True)
 
         # Compute sparse LU
         _lu_laplacian_cache[N] = compute_lu(A)
 
     P = _lu_laplacian_cache[N].solve(W.ravel()).reshape((N, N))
+    P.ravel()[::N+1] -= np.trace(P)/N
     return P
 
 

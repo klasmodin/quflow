@@ -1,13 +1,13 @@
 import numpy as np
 from scipy.io import loadmat
 from .utils import elm2ind
-from .laplacian.sparse import compute_sparse_laplacian
-from numba import njit, prange
+from .laplacian.direct import compute_direct_laplacian
+from numba import njit
 import os
 import os.path
 import h5py
 import appdirs
-from scipy.linalg import eigh, eigh_tridiagonal
+from scipy.linalg import eigh_tridiagonal
 
 # ----------------
 # GLOBAL VARIABLES
@@ -170,20 +170,6 @@ def adjust_basis_orientation_(w2, m, tol=1e-16):
             w2[:, i] *= (-1 if m % 2 == 1 else 1)
 
 
-@njit
-def get_m_laplacians_(kki, lli, llj, data, N, basis_break_indices, laplace_out):
-    for k in range(data.shape[0]):
-        v = data[k]
-        ki = kki[k]
-        li = lli[k]
-        lj = llj[k]
-        m = ki-li
-        if m >= 0:
-            bind0 = basis_break_indices[m]
-            bind1 = basis_break_indices[m+1]
-            laplace_out[bind0+li*(N-m)+lj] = np.real(v)
-
-
 def compute_basis(N):
     """
     Compute quantization basis.
@@ -200,19 +186,20 @@ def compute_basis(N):
     basis_break_indices = np.hstack((0, (np.arange(N, 0, -1)**2).cumsum()))
     basis = np.zeros(basis_break_indices[-1], dtype=float)
 
-    laplacian = compute_sparse_laplacian(N, bc=False).tocoo()
-    (kki, lli) = np.unravel_index(laplacian.row, (N, N))
-    (kkj, llj) = np.unravel_index(laplacian.col, (N, N))
-    laplace_vec = np.zeros_like(basis)
-    get_m_laplacians_(kki, lli, llj, laplacian.data, N, basis_break_indices, laplace_vec)
+    # Compute direct laplacian
+    lap = compute_direct_laplacian(N, bc=False)
 
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]
 
-        Delta_m = laplace_vec[bind0:bind1].reshape((N-m, N-m))
-        # v2, w2 = eigh(Delta_m)
-        v2, w2 = eigh_tridiagonal(np.diag(Delta_m), np.diag(Delta_m, -1))
+        # Compute eigen decomposition
+        n = N - m
+        start_ind = N*(N+1)//2 - n*(n+1)//2
+        end_ind = start_ind + n
+        v2, w2 = eigh_tridiagonal(lap[1, start_ind:end_ind], lap[0, start_ind+1:end_ind])
+
+        # Reverse the order
         w2 = w2[:, ::-1]
 
         # The eigenvectors are only defined up to sign.
@@ -599,7 +586,7 @@ def load(filename, qtype="shr"):
         if qtype == "shr":
             return f["omegar"]
         else:
-            raise ValueError("Format %s is not supported yet." % qtype)
+            raise ValueError("qtype = '%s' is not supported (yet)." % qtype)
     elif filename[-3:] == "mat":
         from scipy.io import loadmat
         W = np.squeeze(loadmat(filename)['W0'])

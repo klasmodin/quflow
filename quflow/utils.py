@@ -1,7 +1,7 @@
 import numpy as np
 import pyssht
 from numba import njit
-from laplacian.sparse import solve_heat
+from .laplacian.sparse import solve_heat
 
 
 @njit

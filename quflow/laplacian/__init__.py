@@ -1,1 +1,1 @@
-from .sparse import *
+from .direct import *

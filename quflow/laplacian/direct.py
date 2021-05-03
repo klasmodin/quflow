@@ -111,7 +111,7 @@ def dot_direct_(lap, P, W):
 
 
 @njit(parallel=True)
-def solve_direct_(W, lap, P, vtmp, ytmp):
+def solve_direct_(lap, W, P, vtmp, ytmp):
     """
     Highly optimized function for solving the quantized
     Poisson equation (or more generally the equation defined by
@@ -119,10 +119,10 @@ def solve_direct_(W, lap, P, vtmp, ytmp):
 
     Parameters
     ----------
-    W: ndarray(shape=(N, N), dtype=complex)
-        Input matrix.
     lap: ndarray(shape=(2, N*(N+1)/2), dtype=float)
         Direct laplacian.
+    W: ndarray(shape=(N, N), dtype=complex)
+        Input matrix.
     P: ndarray(shape=(N, N), dtype=complex)
         Output matrix.
     vtmp: ndarray(shape=(N*(N+1)/2,), dtype=float)
@@ -237,7 +237,7 @@ def solve_poisson(W):
     vtmp = np.zeros(lap.shape[1], dtype=np.float64)
     ytmp = np.zeros(lap.shape[1], dtype=np.complex128)
     P = np.zeros_like(W)
-    solve_direct_(W, lap, P, vtmp, ytmp)
+    solve_direct_(lap, W, P, vtmp, ytmp)
 
     return P
 
@@ -265,7 +265,7 @@ def solve_heat(h_times_nu, W0):
         lap = laplacian(N, bc=False)
 
         # Get direct operator for backward Euler
-        heat = np.array([[1.], [0.]]) - h_times_nu*lap
+        heat = np.array([[0.], [1.]]) - h_times_nu*lap
 
         # Store in cache
         _direct_heat_cache[(N, h_times_nu)] = heat
@@ -275,6 +275,6 @@ def solve_heat(h_times_nu, W0):
     vtmp = np.zeros(heat.shape[1], dtype=np.float64)
     ytmp = np.zeros(heat.shape[1], dtype=np.complex128)
     Wh = np.zeros_like(W0)
-    solve_direct_(W0, heat, Wh, vtmp, ytmp)
+    solve_direct_(heat, W0, Wh, vtmp, ytmp)
 
     return Wh

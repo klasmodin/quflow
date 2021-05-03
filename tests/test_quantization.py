@@ -8,7 +8,7 @@ def get_random_omega_real(N=5):
 
 
 def get_random_mat(N=5):
-    W = np.random.randn(N,N)
+    W = np.random.randn(N, N) + 1j*np.random.randn(N, N)
     W -= W.conj().T
     return W
 
