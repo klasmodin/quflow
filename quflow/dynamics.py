@@ -31,10 +31,10 @@ def commutator(W, P):
     VF -= VF.conj().T
     return VF
 
+
 # ----------------------
 # HIGHER LEVEL FUNCTIONS
 # ----------------------
-
 
 def euler(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
     """
@@ -193,3 +193,20 @@ def energy_spectrum(data):
     for el in range(1, N):
         energy[el-1] = (omegar[elm2ind(-el, el):elm2ind(el, el)+1]**2).sum()/(el*(el+1))
     return energy
+
+
+# -------
+# CLASSES
+# -------
+
+class Simulation(object):
+    """
+    Class to keep track of an entire simulation.
+    """
+
+    def __init__(self, initial, stepsize='auto',
+                 inner_steps=100, outer_steps=100, total_steps=None, N=None):
+        pass
+
+
+
