@@ -144,7 +144,7 @@ def rotate(xi, W):
     return R@W@R.T.conj()
 
 
-def north_blob(N, sigma = 0):
+def north_blob(N, sigma=0):
     """
     Return vorticity matrix for blob located at north pole.
 
@@ -168,3 +168,34 @@ def north_blob(N, sigma = 0):
 
     return W
 
+
+def qtime2seconds(qtime, N):
+    """
+    Convert quantum time units to seconds.
+
+    Parameters
+    ----------
+    qtime: float or ndarray
+    N: int
+
+    Returns
+    -------
+    Time in seconds.
+    """
+    return qtime*np.sqrt(16.*np.pi)/N**(3./2.)
+
+
+def seconds2qtime(t, N):
+    """
+    Convert seconds to quantum time unit.
+
+    Parameters
+    ----------
+    t: float or ndarray
+    N: int
+
+    Returns
+    -------
+    Time in quantum time units.
+    """
+    return t/np.sqrt(16.*np.pi)*N**(3./2.)
