@@ -7,7 +7,7 @@ with io.open('README.md', 'r', encoding='utf-8') as readme_file:
 setup_args = {
     'name': 'quflow',
     'author': 'Klas Modin',
-    'url': 'https://bitbucket.org/kmodin/quflow',
+    'url': 'https://github.com/kmodin/quflow/',
     'license': 'MIT',
     'description': '',
     'long_description': readme,

@@ -1,5 +1,6 @@
 from .transforms import as_fun
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 def plot(data, ax=None, symmetric=False, colorbar=True, **kwargs):
@@ -27,9 +28,8 @@ def plot(data, ax=None, symmetric=False, colorbar=True, **kwargs):
         Object returned by `ax.imshow(...)`.
     """
     if isinstance(data, tuple) or isinstance(data, list):
-        from matplotlib.pyplot import subplots
         if ax is None:
-            fig, axs = subplots(len(data), sharex=True)
+            fig, axs = plt.subplots(len(data), sharex=True)
             fig.tight_layout(h_pad=0)
         else:
             assert len(ax) == len(data), "Number of data and axes elements must agree."
