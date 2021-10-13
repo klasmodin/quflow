@@ -1,4 +1,6 @@
 import numpy as np
+import scipy.linalg
+
 from .laplacian.direct import solve_poisson
 from .transforms import as_shr
 from .utils import elm2ind
@@ -87,14 +89,14 @@ def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
 
         # Evaluate RHS at W
         P = hamiltonian(W)
-        F0 = commutator(W, P)
+        F0 = commutator(P, W)
 
         # Compute Heun predictor
         Wprime = W + stepsize*F0
 
         # Evaluate RHS at predictor WP
         P = hamiltonian(Wprime)
-        F = commutator(Wprime, P)
+        F = commutator(P, Wprime)
 
         # Compute averaged RHS
         F += F0
@@ -142,6 +144,84 @@ def rk4(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
         K4 = commutator(P, Wprime)
 
         W += (stepsize/6.0)*(K1+2*K2+2*K3+K4)
+
+    return W
+
+
+def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, tol=1e-8, maxit=10, verbatim=False):
+    """
+    Time-stepping by isospectral midpoint second order method.
+
+    Parameters
+    ----------
+    W: ndarray
+        Initial vorticity (overwritten and returned).
+    stepsize: float
+        Time step length.
+    steps: int
+        Number of steps to take.
+    hamiltonian: function
+        The Hamiltonian returning a stream matrix.
+    tol: float
+        Tolerance for iterations.
+    maxit: int
+        Maximum number of iterations.
+    verbatim: bool
+        Print extra information if True. Default is False.
+
+    Returns
+    -------
+    W: ndarray
+    """
+    Id = np.eye(W.shape[0])
+
+    Wtilde = W.copy()
+
+    total_iterations = 0
+
+    for k in range(steps):
+
+        for i in range(maxit):
+
+            # Update iterations
+            total_iterations += 1
+
+            # Update Ptilde
+            Ptilde = hamiltonian(Wtilde)
+
+            # Compute matrix A
+            A = Id - stepsize/2.0*Ptilde
+
+            # Compute LU of A
+            luA, piv = scipy.linalg.lu_factor(A)
+
+            # Solve first equation for B
+            B = scipy.linalg.lu_solve((luA, piv), W)
+
+            # Solve second equation for Wtilde
+            Wtilde_new = scipy.linalg.lu_solve((luA, piv), -B.conj().T)
+
+            # Compute error
+            resnorm = scipy.linalg.norm(Wtilde - Wtilde_new, np.inf)
+
+            # Update variables
+            Wtilde = (Wtilde_new - Wtilde_new.conj().T)/2.0
+
+            # Check error
+            if resnorm < tol:
+                break
+
+        else:
+            # We used maxit iterations
+            if verbatim:
+                print("Max iterations {} reached!".format(maxit))
+
+        # Update W before returning
+        W_new = A.conj().T@Wtilde@A
+        np.copyto(W, W_new)
+
+    if verbatim:
+        print("Average number of iterations per step: {:.2f}".format(total_iterations/steps))
 
     return W
 
