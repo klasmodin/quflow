@@ -1,5 +1,7 @@
+import io
+import re
+
 from setuptools import setup
-import re, io
 
 with io.open('README.md', 'r', encoding='utf-8') as readme_file:
     readme = readme_file.read()
@@ -24,7 +26,7 @@ setup_args = {
     'test_suite': 'pytest',
     'tests_require': ['pytest', 'matplotlib'],
     'setup_requires': ['pytest-runner'],
-    'install_requires': ['numpy', 'numba', 'scipy', 'pyssht>=1.3.4'],
+    'install_requires': ['numpy', 'numba', 'scipy', 'pyssht>=1.3.4', 'appdirs'],
     'classifiers': ['Development Status :: 3 - Alpha',
                     'Intended Audience :: Science/Research',
                     'License :: OSI Approved :: MIT License',

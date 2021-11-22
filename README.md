@@ -20,6 +20,8 @@ Required:
 * `numba`
 * `scipy`
 * `pyssht`
+* `h5py`
+* `appdirs`
 
 Optional:
 
@@ -31,6 +33,7 @@ Optional:
 The module may be installed directly from the repository:
 ```
 > git clone https://github.com/kmodin/quflow.git
+> cd quflow
 > python setup.py install
 # or
 > pip install .
