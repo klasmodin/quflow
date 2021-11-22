@@ -208,11 +208,12 @@ def determine_qtype(data, N=None):
 
 class QuData(object):
 
-    def __init__(self, filename, datapath="/", cache_size=1):
+    def __init__(self, filename, datapath="/", cache_size=1, verbatim=True):
         self.filename = filename
         if len(datapath) == 0 or datapath[-1] != '/':
             datapath += '/'
         self.datapath = datapath
+        self.verbatim = verbatim
 
         # Set default values
         attrs = dict()
@@ -235,6 +236,8 @@ class QuData(object):
                 attrs['qtime_last'] = f[datapath+'qtime'][-1]
                 attrs['qtime_start'] = attrs['qtime_last']
                 attrs['cache_steps'] = 0
+                if self.verbatim:
+                    print("Found data in file {} at qtime = {}.".format(self.filename, attrs['qtime_start']))
             except KeyError:
                 pass
             else:
@@ -276,12 +279,18 @@ class QuData(object):
             self.qtime_cache[self.cache_steps] = qtime
             self.cache_steps += 1
 
+        if self.verbatim:
+            print("qtime = {}, time = {}, output steps = {}".format(qtime, qtime2seconds(qtime, W.shape[-1]),
+                                                                    self.total_steps))
+
         if self.cache_steps == self.cache_size:
             # Time to write to disk
             save(self.filename, self.W_cache, qtime=self.qtime_cache, N=W.shape[0],
                  datapath=self.datapath)
             self.cache_steps = 0
             # self._save_attrs()
+            if self.verbatim:
+                print("Cached data saved to file {}".format(self.filename))
 
         # Save last output time
         self.qtime_last = qtime
@@ -291,7 +300,7 @@ class QuData(object):
 
     def flush(self):
         if self.cache_steps != 0:
-            save(self.filename, self.W_cache[:self.cache_steps], qtime=self.qtime_cache[:self.cache_steps],\
+            save(self.filename, self.W_cache[:self.cache_steps], qtime=self.qtime_cache[:self.cache_steps],
                  N=self.W_cache[0].shape[0], datapath=self.datapath)
             self.cache_steps = 0
             # self._save_attrs()
@@ -385,7 +394,8 @@ def save(filename, data, qtime=None, qstepsize=None, N=None, qtype="shr", datapa
             if statepath not in f:
                 stateset = f.create_dataset(statepath, (0, omegar.shape[-1]),
                                             dtype=omegar.dtype,
-                                            maxshape=(None, omegar.shape[-1])
+                                            maxshape=(None, omegar.shape[-1]),
+                                            chunks=(1, omegar.shape[-1])
                                             )
                 if N is not None:
                     assert N == round(np.sqrt(omegar.shape[-1]))
