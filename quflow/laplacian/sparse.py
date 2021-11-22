@@ -224,7 +224,7 @@ def solve_heat(h_times_nu, W0):
         T = scipy.sparse.eye(N**2) - h_times_nu*A
 
         # Compute sparse LU
-        _lu_heat_flow_cache[(N, h_times_nu)] = compute_lu(T)
+        _lu_heat_flow_cache[(N, h_times_nu)] = compute_lu(T.tocsc())
 
     Wh = _lu_heat_flow_cache[(N, h_times_nu)].solve(W0.ravel()).reshape((N, N))
     return Wh

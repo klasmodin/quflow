@@ -1,8 +1,13 @@
 from setuptools import setup
-import io
+import re, io
 
 with io.open('README.md', 'r', encoding='utf-8') as readme_file:
     readme = readme_file.read()
+
+__version__ = re.search(
+    r'__version__\s*=\s*[\'"]([^\'"]*)[\'"]',  # It excludes inline comment too
+    io.open('quflow/__init__.py', encoding='utf_8_sig').read()
+    ).group(1)
 
 setup_args = {
     'name': 'quflow',
@@ -14,7 +19,7 @@ setup_args = {
     'long_description_content_type': 'text/markdown',
     'package_dir': {'quflow': 'quflow'},
     'packages': ['quflow', ],
-    'version': '0.0.1',
+    'version': __version__,
     'include_package_data': True,
     'test_suite': 'pytest',
     'tests_require': ['pytest', 'matplotlib'],

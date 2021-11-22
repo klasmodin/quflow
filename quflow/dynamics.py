@@ -3,7 +3,7 @@ import scipy.linalg
 
 from .laplacian.direct import solve_poisson
 from .transforms import as_shr
-from .utils import elm2ind
+from .utils import elm2ind, seconds2qtime
 from numba import njit
 
 # ----------------
@@ -148,7 +148,8 @@ def rk4(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
     return W
 
 
-def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, tol=1e-8, maxit=10, verbatim=False):
+def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
+          tol=1e-8, maxit=10, verbatim=False):
     """
     Time-stepping by isospectral midpoint second order method.
 
@@ -190,7 +191,7 @@ def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, tol=1e-8, maxit
             Ptilde = hamiltonian(Wtilde)
 
             # Compute matrix A
-            A = Id - stepsize/2.0*Ptilde
+            A = Id - (stepsize/2.0)*Ptilde
 
             # Compute LU of A
             luA, piv = scipy.linalg.lu_factor(A)
@@ -201,11 +202,15 @@ def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, tol=1e-8, maxit
             # Solve second equation for Wtilde
             Wtilde_new = scipy.linalg.lu_solve((luA, piv), -B.conj().T)
 
+            # Make sure solution is Hermitian (this removes drift in rounding errors)
+            Wtilde_new /= 2.0
+            Wtilde_new -= Wtilde_new.conj().T
+
             # Compute error
             resnorm = scipy.linalg.norm(Wtilde - Wtilde_new, np.inf)
 
             # Update variables
-            Wtilde = (Wtilde_new - Wtilde_new.conj().T)/2.0
+            Wtilde = Wtilde_new
 
             # Check error
             if resnorm < tol:
@@ -214,10 +219,10 @@ def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, tol=1e-8, maxit
         else:
             # We used maxit iterations
             if verbatim:
-                print("Max iterations {} reached!".format(maxit))
+                print("Max iterations {} reached at step {}.".format(maxit, k))
 
         # Update W before returning
-        W_new = A.conj().T@Wtilde@A
+        W_new = A.conj().T @ Wtilde @ A
         np.copyto(W, W_new)
 
     if verbatim:
@@ -275,18 +280,54 @@ def energy_spectrum(data):
     return energy
 
 
-# -------
-# CLASSES
-# -------
+# ----------------------
+# GENERIC SOLVE FUNCTION
+# ----------------------
 
-class Simulation(object):
-    """
-    Class to keep track of an entire simulation.
-    """
+def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
+          method=rk4, hamiltonian=solve_poisson,
+          callback=None, inner_steps=None, inner_qtime=None, inner_time=None, **kwargs):
+    N = W.shape[0]
 
-    def __init__(self, initial, stepsize='auto',
-                 inner_steps=100, outer_steps=100, total_steps=None, N=None):
-        pass
+    # Determine steps
+    if np.array([0 if x is None else 1 for x in [steps, qtime, time]]).sum() != 1:
+        raise ValueError("One, and only one, of steps, qtime, or time should be specified.")
+    if time is not None:
+        qtime = seconds2qtime(time, N)
+    if steps is None:
+        steps = round(qtime/qstepsize)
+    if callback is not None and not isinstance(callback, tuple):
+        callback = (callback,)
 
+    # Determine inner_steps
+    if np.array([0 if x is None else 1 for x in [inner_steps, inner_qtime, inner_time]]).sum() == 0:
+        inner_steps = 100  # Default value of inner_steps
+    elif inner_steps is None:
+        if inner_qtime is not None:
+            inner_steps = round(inner_qtime/qstepsize)
+        elif inner_time is not None:
+            inner_steps = round(seconds2qtime(inner_time, N)/qstepsize)
+
+    # Check if inner_steps is too large
+    if inner_steps > steps:
+        inner_steps = steps
+
+    # Initiate no steps and simulation q-time
+    k = 0
+    qt = 0.0
+
+    # Main simulation loop
+    while True:
+        method(W, qstepsize, steps=inner_steps, hamiltonian=hamiltonian)
+        k += inner_steps
+        qt += inner_steps*qstepsize
+        if callback is not None:
+            for cfun in callback:
+                cfun(W, qt, **kwargs)
+        if k >= steps:
+            break
+        elif k + inner_steps > steps:
+            method(W, qstepsize, steps=steps-k, hamiltonian=hamiltonian)
+            break
 
 
