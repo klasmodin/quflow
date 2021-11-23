@@ -6,6 +6,7 @@ import os.path
 import h5py
 import appdirs
 import datetime
+import time
 
 # ----------------
 # GLOBAL VARIABLES
@@ -208,12 +209,14 @@ def determine_qtype(data, N=None):
 
 class QuData(object):
 
-    def __init__(self, filename, datapath="/", cache_size=1, verbatim=False):
+    def __init__(self, filename, datapath="/", cache_size=1, verbatim=False, max_wait=3600.0):
         self.filename = filename
         if len(datapath) == 0 or datapath[-1] != '/':
             datapath += '/'
         self.datapath = datapath
         self.verbatim = verbatim
+        self.max_wait = max_wait  # Maximum time to wait before flushing
+        self.last_write_time = time.time()
 
         # Set default values
         attrs = dict()
@@ -263,12 +266,13 @@ class QuData(object):
         # Update qtime
         if qtime + self.qtime_start < self.qtime_last:  # Hack to fix that time is always increasing. TODO: Fix this!
             self.qtime_start = self.qtime_last
+            self.last_write_time = time.time()  # Reset this counter
         qtime += self.qtime_start
 
         # Update cache steps and initiate cache if needed
         if self.cache_size == 1:
-            self.W_cache = W
-            self.qtime_cache = qtime
+            self.W_cache = W.reshape((1,)+W.shape)
+            self.qtime_cache = np.array([qtime])
             self.cache_steps = 1
         else:
             if self.W_cache is None:
@@ -282,15 +286,10 @@ class QuData(object):
         if self.verbatim:
             print("qtime = {}, time = {}, output steps = {}".format(qtime, qtime2seconds(qtime, W.shape[-1]),
                                                                     self.total_steps))
-
-        if self.cache_steps == self.cache_size:
+        now = time.time()
+        if self.cache_steps == self.cache_size or now - self.last_write_time > self.max_wait:
             # Time to write to disk
-            save(self.filename, self.W_cache, qtime=self.qtime_cache, N=W.shape[0],
-                 datapath=self.datapath)
-            self.cache_steps = 0
-            # self._save_attrs()
-            if self.verbatim:
-                print("Cached data saved to file {}".format(self.filename))
+            self.flush()
 
         # Save last output time
         self.qtime_last = qtime
@@ -299,11 +298,13 @@ class QuData(object):
         self.flush()
 
     def flush(self):
+        self.last_write_time = time.time()
         if self.cache_steps != 0:
             save(self.filename, self.W_cache[:self.cache_steps], qtime=self.qtime_cache[:self.cache_steps],
                  N=self.W_cache[0].shape[0], datapath=self.datapath)
             self.cache_steps = 0
-            # self._save_attrs()
+            if self.verbatim:
+                print("Cached data saved to file {}".format(self.filename))
 
     def _save_attrs(self, save_cache=False):
         with h5py.File(self.filename, "a") as f:
