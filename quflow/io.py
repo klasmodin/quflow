@@ -208,7 +208,7 @@ def determine_qtype(data, N=None):
 
 class QuData(object):
 
-    def __init__(self, filename, datapath="/", cache_size=1, verbatim=True):
+    def __init__(self, filename, datapath="/", cache_size=1, verbatim=False):
         self.filename = filename
         if len(datapath) == 0 or datapath[-1] != '/':
             datapath += '/'
