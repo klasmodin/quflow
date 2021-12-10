@@ -1,8 +1,119 @@
 from .transforms import as_fun
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib
 from matplotlib.pyplot import subplots
 from mpl_toolkits.axes_grid1 import ImageGrid
+import matplotlib.animation as anim
+
+
+def in_notebook():
+    try:
+        from IPython import get_ipython
+        if 'IPKernelApp' not in get_ipython().config:  # pragma: no cover
+            return False
+    except ImportError:
+        return False
+    except AttributeError:
+        return False
+    return True
+
+
+def create_animation(filename, states, fps=25, preset='medium', extra_args=[], codec='h264',
+                     title='quflow simulation',
+                     scale=None, **kwargs):
+    """
+
+    Parameters
+    ----------
+    filename
+    states
+    fps
+    preset
+    extra_args
+    codec: str (default:'h264')
+        ffmpeg codec. For accelerated Apple encoder, use 'h264_videotoolbox'
+    title
+    scale
+    kwargs
+
+    Returns
+    -------
+
+    """
+
+    FFMpegWriter = anim.writers['ffmpeg']
+    metadata = dict(title=title, artist='Matplotlib', comment='http://github.com/klasmodin/quflow')
+    extra_args = []
+
+    if preset == 'medium':
+        if '-b:v' not in extra_args:
+            extra_args += ['-b:v', '3000K']
+        if '-preset' not in extra_args and codec == 'h264':
+            extra_args += ['-preset', 'veryslow']
+        if scale is None:
+            scale = 1
+    elif preset == "low":
+        if '-b:v' not in extra_args:
+            extra_args += ['-b:v', '1500K']
+        if scale is None:
+            scale = 0.5
+    elif preset == "high":
+        if '-preset' not in extra_args and codec == 'h264':
+            extra_args += ['-preset', 'veryslow']
+
+    # Make sure some scale is selected
+    if scale is None:
+        scale = 1
+
+    # Create ffmpeg writer
+    writer = FFMpegWriter(fps=fps, metadata=metadata, codec=codec, extra_args=extra_args)
+
+    dpi = 100
+
+    f0 = as_fun(states[0])
+    figsize = (f0.shape[1]/float(dpi), f0.shape[0]/float(dpi))
+
+    with matplotlib.rc_context({'backend':'Agg'}):
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_axes([0, 0, 1, 1])
+
+        # Hide spines, ticks, etc.
+        ax.axis('off')
+
+        im = plot(f0, ax=ax, colorbar=False, **kwargs) #, interpolation='nearest')
+        ax.set_frame_on(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel(None)
+        ax.set_ylabel(None)
+
+        print("Writing file {}".format(filename))
+        with writer.saving(fig, filename, dpi=dpi*scale):
+            ndots = 40
+            print("_"*min(ndots, states.shape[0]))
+            for k in range(states.shape[0]):
+                fun = as_fun(states[k])
+                # TODO: insert code here for saving img if state file is writable
+                im.set_data(fun)
+                writer.grab_frame()
+                if k % (max(states.shape[0], ndots)//ndots) == 0:
+                    print("*", end='')
+            print("")
+        # Close figure (so it doesn't show up interactively)
+        plt.close(fig=fig)
+
+    # TODO: Return HTML displaying the movie
+    if in_notebook():
+        from IPython.display import display, HTML
+        htmlstr = "<div align=\"left\">"
+        htmlstr += "<video width=\"{}%\" controls>".format(str(50))
+        htmlstr += "<source src=\"{}\" type=\"video/mp4\">".format(filename)
+        htmlstr += "</video></div>"
+        htmlmovie = HTML(htmlstr)
+        return display(htmlmovie)
+    else:
+        print("Finished!")
 
 
 def plot(data, ax=None, symmetric=False, colorbar=True, use_ticks=True,
