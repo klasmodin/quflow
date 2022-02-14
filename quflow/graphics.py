@@ -1,4 +1,4 @@
-from .transforms import as_fun
+from .transforms import as_fun, mat2shr
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
@@ -19,9 +19,35 @@ def in_notebook():
     return True
 
 
+def resample(data, N):
+    """
+    Up- or downsample data to resolution N.
+
+    Parameters
+    ----------
+    data: ndarray, shape=(M,M) or shape=(M**2,)
+    N: int
+        New resolution.
+
+    Returns
+    -------
+    omega with new resolution
+    """
+    if data.ndim == 2:
+        if data.shape[0] == data.shape[1]:
+            omega = mat2shr(data)
+        else:
+            raise NotImplementedError("Resampling fun data is not supported yet.")
+    elif data.ndim == 1:
+        omega = data
+    omega2 = np.zeros(N**2, dtype=omega.dtype)
+    omega2[:min(N**2,omega.shape[0])] = omega[:min(N**2,omega.shape[0])]
+    return omega2
+
+
 def create_animation(filename, states, fps=25, preset='medium', extra_args=[], codec='h264',
                      title='quflow simulation',
-                     scale=None, **kwargs):
+                     scale=None, N=None, **kwargs):
     """
 
     Parameters
@@ -35,6 +61,8 @@ def create_animation(filename, states, fps=25, preset='medium', extra_args=[], c
         ffmpeg codec. For accelerated Apple encoder, use 'h264_videotoolbox'
     title
     scale
+    N: int or None (default None)
+        Up- or downsample to resolution N in plot.
     kwargs
 
     Returns
@@ -71,7 +99,11 @@ def create_animation(filename, states, fps=25, preset='medium', extra_args=[], c
 
     dpi = 100
 
-    f0 = as_fun(states[0])
+    if N is not None:
+        omega = resample(states[0], N)
+    else:
+        omega = states[0]
+    f0 = as_fun(omega)
     figsize = (f0.shape[1]/float(dpi), f0.shape[0]/float(dpi))
 
     with matplotlib.rc_context({'backend':'Agg'}):
@@ -93,7 +125,11 @@ def create_animation(filename, states, fps=25, preset='medium', extra_args=[], c
             ndots = 40
             print("_"*min(ndots, states.shape[0]))
             for k in range(states.shape[0]):
-                fun = as_fun(states[k])
+                if N is not None:
+                    omega = resample(states[k], N)
+                else:
+                    omega = states[k]
+                fun = as_fun(omega)
                 # TODO: insert code here for saving img if state file is writable
                 im.set_data(fun)
                 writer.grab_frame()
@@ -105,20 +141,24 @@ def create_animation(filename, states, fps=25, preset='medium', extra_args=[], c
 
     # TODO: Return HTML displaying the movie
     if in_notebook():
-        from IPython.display import display, HTML
-        htmlstr = "<div align=\"left\">"
-        htmlstr += "<video width=\"{}%\" controls>".format(str(50))
-        htmlstr += "<source src=\"{}\" type=\"video/mp4\">".format(filename)
-        htmlstr += "</video></div>"
-        htmlmovie = HTML(htmlstr)
-        return display(htmlmovie)
+        if False:
+            from IPython.display import display, HTML
+            htmlstr = "<div align=\"left\">"
+            htmlstr += "<video width=\"{}%\" controls>".format(str(50))
+            htmlstr += "<source src=\"{}\" type=\"video/mp4\">".format(filename)
+            htmlstr += "</video></div>"
+            htmlmovie = HTML(htmlstr)
+            return display(htmlmovie)
+        else:
+            from IPython.display import Video
+            return Video(filename, embed=False)
     else:
         print("Finished!")
 
 
 def plot(data, ax=None, symmetric=False, colorbar=True, use_ticks=True,
          xlabel="azimuth", ylabel="elevation",
-         axes_pad=0.15, cbar_mode="edge", cbar_size="3%", **kwargs):
+         axes_pad=0.15, cbar_mode="edge", cbar_size="3%", N=None, **kwargs):
     """
     Plot quantized function. Good colormap arguments:
     - `cmap='twilight_shifted'` or `cmap = 'seismic'` for bright plots (this is default)
@@ -147,6 +187,8 @@ def plot(data, ax=None, symmetric=False, colorbar=True, use_ticks=True,
         Colorbar mode to send into `ImageGrid` (see its documentation for options).
     cbar_size:
         Colorbar size to send into `ImageGrid` (see its documentation for options).
+    N: int or None (default None)
+        Up- or downsample to resolution N in plot.
     kwargs:
         Arguments to send to `ax.imshow(...)`.
 
@@ -252,6 +294,8 @@ def plot(data, ax=None, symmetric=False, colorbar=True, use_ticks=True,
         #     fig.tight_layout(h_pad=0, w_pad=0)
         return np.asarray(ims).reshape((rows, cols))
 
+    if N is not None:
+        data = resample(data, N)
     fun = as_fun(data)
     if np.iscomplexobj(fun):
         fun = fun.real

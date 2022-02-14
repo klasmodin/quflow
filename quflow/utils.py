@@ -144,6 +144,44 @@ def rotate(xi, W):
     return R@W@R.T.conj()
 
 
+def blob(N, pos=np.array([0.0, 0.0, 1.0]), sigma=0):
+    """
+    Return vorticity matrix for blob located at 'pos'.
+
+    Parameters
+    ----------
+    N: int
+    pos: ndarray(shape=(3,), dtype=double)
+    sigma: float (optional)
+
+    Returns
+    -------
+    W: ndarray(shape=(N,N), dtype=complex)
+    """
+
+    # First find rotation matrix r
+    a = np.zeros((3, 3))
+    a[:, 0] = pos
+    q, r = np.linalg.qr(a)
+    if np.dot(q[:, 0], pos) < 0:
+        q[:, 0] *= -1
+    if np.linalg.det(q) < 0:
+        q[:, -1] *= -1
+    q = np.roll(q, 2, axis=-1)
+
+    # Then find axis-angle representation
+    from scipy.spatial.transform import Rotation as R
+    xi = R.from_matrix(q).as_rotvec()
+
+    # Create north blob
+    W = north_blob(N, sigma)
+
+    # Rotate it
+    W = rotate(xi, W)
+
+    return W
+
+
 def north_blob(N, sigma=0):
     """
     Return vorticity matrix for blob located at north pole.
