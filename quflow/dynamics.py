@@ -149,7 +149,7 @@ def rk4(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
 
 
 def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
-          tol=1e-8, maxit=10, verbatim=False):
+          tol=1e-8, maxit=10, verbatim=False, enforce_hermitian=True):
     """
     Time-stepping by isospectral midpoint second order method.
 
@@ -169,6 +169,8 @@ def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
         Maximum number of iterations.
     verbatim: bool
         Print extra information if True. Default is False.
+    enforce_hermitian: bool
+        Enforce at every step that the vorticity matrix is hermitian.
 
     Returns
     -------
@@ -181,6 +183,8 @@ def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
     total_iterations = 0
 
     for k in range(steps):
+
+        # --- Beginning of step ---
 
         for i in range(maxit):
 
@@ -203,8 +207,9 @@ def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
             Wtilde_new = scipy.linalg.lu_solve((luA, piv), -B.conj().T)
 
             # Make sure solution is Hermitian (this removes drift in rounding errors)
-            Wtilde_new /= 2.0
-            Wtilde_new -= Wtilde_new.conj().T
+            if enforce_hermitian:
+                Wtilde_new /= 2.0
+                Wtilde_new -= Wtilde_new.conj().T
 
             # Compute error
             resnorm = scipy.linalg.norm(Wtilde - Wtilde_new, np.inf)
@@ -221,12 +226,77 @@ def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
             if verbatim:
                 print("Max iterations {} reached at step {}.".format(maxit, k))
 
-        # Update W before returning
+        # Update W
         W_new = A.conj().T @ Wtilde @ A
         np.copyto(W, W_new)
 
+        # --- End of step ---
+
     if verbatim:
         print("Average number of iterations per step: {:.2f}".format(total_iterations/steps))
+
+    return W
+
+
+def isomp_simple(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
+                 enforce_hermitian=True):
+    """
+    Time-stepping by the simplified isospectral midpoint method. This is an isospectral
+    but not fully symplectic method. Nor is it reversible.
+
+    Parameters
+    ----------
+    W: ndarray
+        Initial vorticity (overwritten and returned).
+    stepsize: float
+        Time step length.
+    steps: int
+        Number of steps to take.
+    hamiltonian: function
+        The Hamiltonian returning a stream matrix.
+    enforce_hermitian: bool
+        Enforce at every step that the vorticity matrix is hermitian.
+
+    Returns
+    -------
+    W: ndarray
+    """
+    Id = np.eye(W.shape[0])
+
+    Wtilde = W.copy()
+
+    for k in range(steps):
+
+        # --- Beginning of step ---
+
+        # Update Ptilde
+        Ptilde = hamiltonian(Wtilde)
+
+        # Compute matrix A
+        A = Id - (stepsize/2.0)*Ptilde
+
+        # Compute LU of A
+        luA, piv = scipy.linalg.lu_factor(A)
+
+        # Solve first equation for B
+        B = scipy.linalg.lu_solve((luA, piv), W)
+
+        # Solve second equation for Wtilde
+        Wtilde_new = scipy.linalg.lu_solve((luA, piv), -B.conj().T)
+
+        # Make sure solution is Hermitian (this removes drift in rounding errors)
+        if enforce_hermitian:
+            Wtilde_new /= 2.0
+            Wtilde_new -= Wtilde_new.conj().T
+
+        # Update variables
+        Wtilde = Wtilde_new
+
+        # Update W
+        W_new = A.conj().T @ Wtilde @ A
+        np.copyto(W, W_new)
+
+        # --- End of step ---
 
     return W
 
