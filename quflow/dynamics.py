@@ -346,7 +346,7 @@ def energy_spectrum(data):
     N = round(np.sqrt(omegar.shape[0]))
     energy = np.ones(N-1, dtype=float)
     for el in range(1, N):
-        energy[el-1] = (omegar[elm2ind(-el, el):elm2ind(el, el)+1]**2).sum()/(el*(el+1))
+        energy[el-1] = (omegar[elm2ind(el, -el):elm2ind(el, el)+1]**2).sum()/(el*(el+1))
     return energy
 
 
@@ -355,9 +355,45 @@ def energy_spectrum(data):
 # ----------------------
 
 def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
-          method=rk4, hamiltonian=solve_poisson,
+          method=rk4, method_kwargs=None,
           callback=None, inner_steps=None, inner_qtime=None, inner_time=None, **kwargs):
+    """
+    High-level solve function.
+
+    Parameters
+    ----------
+    W: ndarray(shape=(N, N), dtype=complex)
+        Initial vorticity matrix.
+    qstepsize: float
+        Time step length in qtime units.
+    steps: None or int
+        Total number of steps to take.
+    qtime: None or float
+        Total simulation time in qtime.
+    time: None or float
+        Total simulation time in seconds.
+    method: callable(W, qstepsize, steps, hamiltonian, **method_kwargs)
+        Integration method to carry out the steps.
+    method_kwargs: dict
+        Extra keyword arguments to send to method at each step.
+    callback: callable(W, qtime, **kwargs)
+        The callback function evaluated every outer step.
+        It uses **kwargs as extra keyword arguments.
+        It is not evaluated at the initial time.
+    inner_steps: None or int
+        Number of steps taken between each callback.
+    inner_qtime: None or float
+        Approximate qtime between each callback.
+    inner_time: None or float
+        Approximate time in seconds between each callback.
+    """
     N = W.shape[0]
+
+    # Set default hamiltonian if needed
+    if method_kwargs is None:
+        method_kwargs = {}
+    if 'hamiltonian' not in method_kwargs:
+        method_kwargs['hamiltonian'] = solve_poisson
 
     # Determine steps
     if np.array([0 if x is None else 1 for x in [steps, qtime, time]]).sum() != 1:

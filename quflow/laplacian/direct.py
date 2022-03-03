@@ -7,6 +7,7 @@ from numba import njit, prange
 
 _direct_laplacian_cache = dict()
 _direct_heat_cache = dict()
+_direct_viscdamp_cache = dict()
 
 
 # ---------------------
@@ -244,12 +245,12 @@ def solve_poisson(W):
 
 def solve_heat(h_times_nu, W0):
     """
-    Solve quantized heat equation.
+    Solve quantized heat equation using backward Euler method.
 
     Parameters
     ----------
     h_times_nu: float
-        Time-step times viscosity.
+        Stepsize (in qtime) times viscosity.
     W0: ndarray(shape=(N, N), dtype=complex)
 
     Returns
@@ -276,5 +277,67 @@ def solve_heat(h_times_nu, W0):
     ytmp = np.zeros(heat.shape[1], dtype=np.complex128)
     Wh = np.zeros_like(W0)
     solve_direct_(heat, W0, Wh, vtmp, ytmp)
+
+    return Wh
+
+
+def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
+    """
+    Solve quantized viscosity and damping equation
+
+        W' - nu * ∆ W + alpha * W = F
+
+    for one time-step using the theta scheme.
+
+    Parameters
+    ----------
+    h: float
+        Time-step.
+    W0: ndarray(shape=(N, N), dtype=complex)
+        Initial vorticity matrix.
+    nu: float
+        Viscosity.
+    alpha: float
+        Damping.
+    force: None or ndarray(shape=(N, N), dtype=complex)
+        External forcing F applied.
+    theta: float
+        Weighting in the theta method (Crank-Nicolson for theta=0.5).
+
+    Returns
+    -------
+    Wh: ndarray(shape=(N, N), dtype=complex)
+    """
+    global _direct_viscdamp_cache
+
+    N = W0.shape[0]
+
+    if (N, h, nu, alpha) not in _direct_heat_cache:
+        # Get direct laplacian
+        lap = laplacian(N, bc=False)
+
+        # Get direct operator for theta method
+        viscdamp = (1.0+h*alpha*theta)*np.array([[0.], [1.]]) - (h*nu*theta)*lap
+
+        # Store in cache
+        _direct_viscdamp_cache[(N, h, nu, alpha)] = viscdamp
+    else:
+        viscdamp = _direct_viscdamp_cache[(N, h, nu, alpha)]
+
+    vtmp = np.zeros(viscdamp.shape[1], dtype=np.float64)
+    ytmp = np.zeros(viscdamp.shape[1], dtype=np.complex128)
+
+    # Prepare right hand side in Crank-Nicolson
+    if theta == 1:
+        Wrhs = W0.copy()
+    else:
+        Wrhs = (1.0-alpha*h*(1-theta))*W0
+        Wrhs += (nu*h*(1-theta))*laplace(W0)
+    if force is not None:
+        Wrhs += h*force
+
+    # Solve linear subsystems
+    Wh = np.zeros_like(W0)
+    solve_direct_(viscdamp, Wrhs, Wh, vtmp, ytmp)
 
     return Wh
