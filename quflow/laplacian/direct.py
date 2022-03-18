@@ -93,7 +93,7 @@ def dot_direct_(lap, P, W):
             W[m, 0] = -np.conj(wk)
 
         # k = 1,...,n-2
-        for k in range(1,n-1):
+        for k in range(1, n-1):
             pk_minus = P[k-1, m+k-1]
             pk = P[k, m+k]
             pk_plus = P[k+1, m+k+1]
