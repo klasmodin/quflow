@@ -394,6 +394,7 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
         method_kwargs = {}
     if 'hamiltonian' not in method_kwargs:
         method_kwargs['hamiltonian'] = solve_poisson
+    hamiltonian = method_kwargs['hamiltonian']
 
     # Determine steps
     if np.array([0 if x is None else 1 for x in [steps, qtime, time]]).sum() != 1:
