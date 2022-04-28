@@ -131,7 +131,12 @@ def create_animation(filename, states, fps=25, preset='medium', extra_args=[], c
                     omega = states[k]
                 fun = as_fun(omega)
                 # TODO: insert code here for saving img if state file is writable
-                im.set_data(fun)
+                if hasattr(im, 'set_data'):
+                    im.set_data(fun)
+                elif hasattr(im, 'set_array'):
+                    im.set_array(fun)
+                else:
+                    raise NotImplementedError("Could not find method for setting data.")
                 writer.grab_frame()
                 if k % (max(states.shape[0], ndots)//ndots) == 0:
                     print("*", end='')

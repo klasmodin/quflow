@@ -372,7 +372,7 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
         Total simulation time in qtime.
     time: None or float
         Total simulation time in seconds.
-    method: callable(W, qstepsize, steps, hamiltonian, **method_kwargs)
+    method: callable(W, qstepsize, steps, **method_kwargs)
         Integration method to carry out the steps.
     method_kwargs: dict
         Extra keyword arguments to send to method at each step.
