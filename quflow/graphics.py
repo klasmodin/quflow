@@ -380,3 +380,189 @@ def plot(data, ax=None, symmetric=False, colorbar=True, use_ticks=True,
         ax.figure.colorbar(im, cax=cax)
 
     return im
+
+
+def plot2(data, ax=None, projection=None, dpi=150, gridon=True, colorbar=False, title=None,
+          xlabel="azimuth", ylabel="elevation", padding=None, N=None, **kwargs):
+    """
+    Better plot quantized function.
+
+    Parameters
+    ----------
+    data: ndarray or tuple of ndarray
+        Can be either mat, omegac, omegar, or fun.
+    ax:
+        Matplotlib axis to plot it (created if `None` which is default).
+    projection: None or str
+        Which projection to use.
+    dpi : int (default 150)
+        Resolution to use.
+    colorbar: bool
+        Whether to add colorbar to plot.
+    title: str or None
+        Plot title.
+    xlabel: str
+        Label on x-axis.
+    ylabel: str
+        Label on y-axis.
+    padding: int or None (default None)
+        Amount (in pixels) of extra padding around image.
+    N: int or None (default None)
+        Up- or downsample to resolution N in plot.
+    kwargs:
+        Arguments to send to `ax.pcolormesh(...)`.
+
+    Returns
+    -------
+        Object returned by `ax.pcolormesh(...)`.
+    """
+
+    # Convert and resample data if needed.
+    if N is not None:
+        data = resample(data, N)
+    fun = as_fun(data)
+    if np.iscomplexobj(fun):
+        fun = fun.real
+
+    # Create figure and axis if needed.
+    if ax is None:
+        if padding is None:
+            if projection is None and title is None and colorbar is False:
+                padding = 0
+            else:
+                padding = 2
+
+        wpixels = fun.shape[1] + 2*padding
+        hpixels = fun.shape[0] + 2*padding
+        default_title_height_pixels = round(25*dpi/100)
+        if title is not None:
+            hpixels += default_title_height_pixels
+        default_color_bar_width_frac = 0.03
+        default_color_bar_pad_frac = 0.02
+        if colorbar:
+            wpixels = round( (1+default_color_bar_width_frac+default_color_bar_pad_frac)*wpixels )
+            wpixels += 2*default_title_height_pixels
+
+        # Create figure
+        figsize = (wpixels/float(dpi), hpixels/float(dpi))
+        fig = plt.figure(figsize=figsize)
+
+        # Create image axes
+        left = padding/wpixels
+        bottom = padding/hpixels
+        width = fun.shape[1]/wpixels
+        height = fun.shape[0]/hpixels
+        ax = fig.add_axes([left, bottom, width, height], projection=projection)
+        if title:
+            ax.set_title(title)
+
+        # Create colorbar axes
+        if colorbar:
+            cax = fig.add_axes([left + width + default_color_bar_pad_frac,
+                                bottom, default_color_bar_width_frac, height])
+
+    # Check limits if needed
+    minmax = np.abs(fun).max()
+    if 'vmin' not in kwargs:
+        kwargs['vmin'] = -minmax
+    if 'vmax' not in kwargs:
+        kwargs['vmax'] = minmax
+
+    # Check colormap
+    if 'cmap' not in kwargs:
+        kwargs['cmap'] = 'RdBu'
+
+    # Create the plot
+    lon = np.linspace(-np.pi, np.pi, fun.shape[1])
+    lat = np.linspace(-np.pi/2., np.pi/2., fun.shape[0])
+    im = ax.pcolormesh(lon, lat, fun, rasterized=True, **kwargs)
+    if gridon:
+        ax.grid(linestyle='-', color='black', alpha=0.2)
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+    if colorbar:
+        im.figure.colorbar(mappable=im, cax=cax)
+
+    return im
+
+
+def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_args=None,
+                      codec='h264', title='QUFLOW animation', **kwargs):
+    """
+    Parameters
+    ----------
+    title
+    filename
+    states
+    fps
+    preset
+    extra_args
+    codec: str (default:'h264')
+        ffmpeg codec. For accelerated Apple encoder, use 'h264_videotoolbox'
+    kwargs
+        Sent to qf.plot(...)
+
+    Returns
+    -------
+
+    """
+    FFMpegWriter = anim.writers['ffmpeg']
+    title = title.replace('QUFLOW', filename.replace('.mp4', ''))
+    metadata = dict(title=title, artist='Matplotlib', comment='http://github.com/klasmodin/quflow')
+    if extra_args is None:
+        extra_args = []
+
+    if preset == 'medium':
+        if '-b:v' not in extra_args:
+            extra_args += ['-b:v', '3000K']
+        if '-preset' not in extra_args and codec == 'h264':
+            extra_args += ['-preset', 'veryslow']
+    elif preset == "low":
+        if '-b:v' not in extra_args:
+            extra_args += ['-b:v', '1500K']
+    elif preset == "high":
+        if '-preset' not in extra_args and codec == 'h264':
+            extra_args += ['-preset', 'veryslow']
+
+    # Create ffmpeg writer
+    writer = FFMpegWriter(fps=fps, metadata=metadata, codec=codec, extra_args=extra_args)
+
+    if N is not None:
+        omega = resample(states[0], N)
+    else:
+        omega = states[0]
+    f0 = as_fun(omega)
+
+    with matplotlib.rc_context({'backend': 'Agg'}):
+
+        im = plot2(f0, **kwargs)
+
+        print("Writing file {}".format(filename))
+        with writer.saving(im.figure, filename, dpi=100):
+            ndots = 40
+            print("_"*min(ndots, states.shape[0]))
+            for k in range(states.shape[0]):
+                if N is not None:
+                    omega = resample(states[k], N)
+                else:
+                    omega = states[k]
+                fun = as_fun(omega)
+                # TODO: insert code here for saving img if state file is writable
+                if hasattr(im, 'set_data'):
+                    im.set_data(fun)
+                elif hasattr(im, 'set_array'):
+                    im.set_array(fun)
+                else:
+                    raise NotImplementedError("Could not find method for setting data.")
+                writer.grab_frame()
+                if k % (max(states.shape[0], ndots)//ndots) == 0:
+                    print("*", end='')
+            print("")
+        # Close figure (so it doesn't show up interactively)
+        plt.close(fig=im.figure)
+
+    if in_notebook():
+        from IPython.display import Video
+        return Video(filename, embed=False)
+    else:
+        print("Finished!")
