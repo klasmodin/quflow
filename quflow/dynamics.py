@@ -1,9 +1,9 @@
 import numpy as np
 import scipy.linalg
 
-from .laplacian.direct import solve_poisson
+from .laplacian.direct import solve_poisson, solve_heat
 from .transforms import as_shr
-from .utils import elm2ind, seconds2qtime
+from .utils import elm2ind, seconds2qtime, rotate
 from numba import njit
 
 # ----------------
@@ -350,6 +350,69 @@ def energy_spectrum(data):
     return energy
 
 
+def blob(N, pos=np.array([0.0, 0.0, 1.0]), sigma=0):
+    """
+    Return vorticity matrix for blob located at 'pos'.
+
+    Parameters
+    ----------
+    N: int
+    pos: ndarray(shape=(3,), dtype=double)
+    sigma: float (optional)
+
+    Returns
+    -------
+    W: ndarray(shape=(N,N), dtype=complex)
+    """
+
+    # First find rotation matrix r
+    a = np.zeros((3, 3))
+    a[:, 0] = pos
+    q, r = np.linalg.qr(a)
+    if np.dot(q[:, 0], pos) < 0:
+        q[:, 0] *= -1
+    if np.linalg.det(q) < 0:
+        q[:, -1] *= -1
+    q = np.roll(q, 2, axis=-1)
+
+    # Then find axis-angle representation
+    from scipy.spatial.transform import Rotation as R
+    xi = R.from_matrix(q).as_rotvec()
+
+    # Create north blob
+    W = north_blob(N, sigma)
+
+    # Rotate it
+    W = rotate(xi, W)
+
+    return W
+
+
+def north_blob(N, sigma=0):
+    """
+    Return vorticity matrix for blob located at north pole.
+
+    Parameters
+    ----------
+    N: int
+    sigma: float (optional)
+        Gaussian sigma for blob. If 0 (default) then give best
+        approximation to point vortex
+
+    Returns
+    -------
+    W: ndarray(shape=(N, N), dtype=complex)
+    """
+
+    W = np.zeros((N, N), dtype=complex)
+    W[-1, -1] = 1.0j
+
+    if sigma != 0:
+        W = solve_heat(sigma/4., W)
+
+    return W
+
+
 # ----------------------
 # GENERIC SOLVE FUNCTION
 # ----------------------
@@ -418,6 +481,12 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
     # Check if inner_steps is too large
     if inner_steps > steps:
         inner_steps = steps
+
+    # DEBUGGING:
+    # print('steps: ', steps)
+    # print('inner_steps: ', inner_steps)
+    # print('no output steps: ', steps//inner_steps)
+    # assert False, "Aborting!"
 
     # Initiate no steps and simulation q-time
     k = 0

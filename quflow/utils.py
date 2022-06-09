@@ -1,7 +1,75 @@
 import numpy as np
 import pyssht
-from numba import njit
-from .laplacian.sparse import solve_heat
+from numba import njit, prange
+
+
+@njit
+def mat2diagh(W):
+    """
+    Return lower diagonal format for hermitian matrix W.
+
+    Parameters
+    ----------
+    W: ndarray, shape=(N, N)
+
+    Returns
+    -------
+    ndarray, shape=(N//2+1, N)
+    """
+    W = np.ascontiguousarray(W)
+    N = W.shape[0]
+    d = np.zeros((N//2+1, N), dtype=W.dtype)
+    for m in range(N//2+1):
+        # Extract m:th lower diagonal
+        dm = W.ravel()[N*m:(N-m)*(N+1)+N*m:N+1]
+
+        # Extract (N-m):th lower diagonal
+        dNm = W.ravel()[N*(N-m):m*(N+1)+N*(N-m):N+1]
+
+        # Insert in d matrix
+        d[m, :N-m] = dm
+        d[m, N-m:] = dNm
+
+    return d
+
+
+@njit
+def diagh2mat(dlow):
+    """
+    Return hermitian matrix W from lower diagonal format.
+
+    Parameters
+    ----------
+    dlow: ndarray, shape=(N//2+1, N)
+
+    Returns
+    -------
+    ndarray, shape=(N, N)
+    """
+    N = dlow.shape[-1]
+    assert dlow.shape[-2] == N//2+1, "Seems dlow is out of shape!"
+    W = np.zeros((N, N), dtype=dlow.dtype)
+
+    for m in range(N//2+1):
+        # Extract m:th lower diagonal
+        dlm = W.ravel()[N*m:(N-m)*(N+1)+N*m:N+1]
+
+        # Extract (N-m):th lower diagonal
+        dlNm = W.ravel()[N*(N-m):m*(N+1)+N*(N-m):N+1]
+
+        # Extract m:th upper diagonal
+        dum = W.ravel()[m:(N-m)*(N+1)+m:N+1]
+
+        # Extract (N-m):th upper diagonal
+        duNm = W.ravel()[N-m:m*(N+1)+N-m:N+1]
+
+        # Insert in W matrix
+        dum[:] = -dlow[m, :N-m].conj()
+        duNm[:] = -dlow[m, N-m:].conj()
+        dlm[:] = dlow[m, :N-m]
+        dlNm[:] = dlow[m, N-m:]
+
+    return W
 
 
 @njit
@@ -142,69 +210,6 @@ def rotate(xi, W):
     S1, S2, S3 = so3generators(N)
     R = expm(xi[0]*S1 + xi[1]*S2 + xi[2]*S3)
     return R@W@R.T.conj()
-
-
-def blob(N, pos=np.array([0.0, 0.0, 1.0]), sigma=0):
-    """
-    Return vorticity matrix for blob located at 'pos'.
-
-    Parameters
-    ----------
-    N: int
-    pos: ndarray(shape=(3,), dtype=double)
-    sigma: float (optional)
-
-    Returns
-    -------
-    W: ndarray(shape=(N,N), dtype=complex)
-    """
-
-    # First find rotation matrix r
-    a = np.zeros((3, 3))
-    a[:, 0] = pos
-    q, r = np.linalg.qr(a)
-    if np.dot(q[:, 0], pos) < 0:
-        q[:, 0] *= -1
-    if np.linalg.det(q) < 0:
-        q[:, -1] *= -1
-    q = np.roll(q, 2, axis=-1)
-
-    # Then find axis-angle representation
-    from scipy.spatial.transform import Rotation as R
-    xi = R.from_matrix(q).as_rotvec()
-
-    # Create north blob
-    W = north_blob(N, sigma)
-
-    # Rotate it
-    W = rotate(xi, W)
-
-    return W
-
-
-def north_blob(N, sigma=0):
-    """
-    Return vorticity matrix for blob located at north pole.
-
-    Parameters
-    ----------
-    N: int
-    sigma: float (optional)
-        Gaussian sigma for blob. If 0 (default) then give best
-        approximation to point vortex
-
-    Returns
-    -------
-    W: ndarray(shape=(N, N), dtype=complex)
-    """
-
-    W = np.zeros((N, N), dtype=complex)
-    W[-1, -1] = 1.0j
-
-    if sigma != 0:
-        W = solve_heat(sigma/4., W)
-
-    return W
 
 
 def qtime2seconds(qtime, N):
