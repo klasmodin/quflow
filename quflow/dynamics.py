@@ -38,7 +38,7 @@ def commutator(W, P):
 # HIGHER LEVEL FUNCTIONS
 # ----------------------
 
-def euler(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
+def euler(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
     """
     Time-stepping by Euler's explicit first order method.
 
@@ -52,21 +52,29 @@ def euler(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
         Number of steps to take.
     hamiltonian: function
         The Hamiltonian returning a stream matrix.
+    forcing: function(P, W)
+        Extra force function (to allow non-isospectral perturbations).
 
     Returns
     -------
     W: ndarray
     """
+    if forcing is None:
+        rhs = commutator
+    else:
+        def rhs(P, W):
+            return commutator(P, W) + forcing(P, W)
+
     for k in range(steps):
 
         P = hamiltonian(W)
-        VF = commutator(P, W)
+        VF = rhs(P, W)
         W += stepsize*VF
 
     return W
 
 
-def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
+def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
     """
     Time-stepping by Heun's second order method.
 
@@ -78,25 +86,33 @@ def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
         Time step length.
     steps: int
         Number of steps to take.
-    hamiltonian: function
+    hamiltonian: function(W)
         The Hamiltonian returning a stream matrix.
+    forcing: function(P, W)
+        Extra force function (to allow non-isospectral perturbations).
 
     Returns
     -------
     W: ndarray
     """
+    if forcing is None:
+        rhs = commutator
+    else:
+        def rhs(P, W):
+            return commutator(P, W) + forcing(P, W)
+
     for k in range(steps):
 
         # Evaluate RHS at W
         P = hamiltonian(W)
-        F0 = commutator(P, W)
+        F0 = rhs(P, W)
 
         # Compute Heun predictor
         Wprime = W + stepsize*F0
 
         # Evaluate RHS at predictor WP
         P = hamiltonian(Wprime)
-        F = commutator(P, Wprime)
+        F = rhs(P, Wprime)
 
         # Compute averaged RHS
         F += F0
@@ -108,7 +124,7 @@ def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
     return W
 
 
-def rk4(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
+def rk4(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
     """
     Time-stepping by the classical Runge-Kutta fourth order method.
 
@@ -120,28 +136,36 @@ def rk4(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson):
         Time step length.
     steps: int
         Number of steps to take.
-    hamiltonian: function
+    hamiltonian: function(W)
         The Hamiltonian returning a stream matrix.
+    forcing: function(P, W) or None (default)
+        Extra force function (to allow non-isospectral perturbations).
 
     Returns
     -------
     W: ndarray
     """
+    if forcing is None:
+        rhs = commutator
+    else:
+        def rhs(P, W):
+            return commutator(P, W) + forcing(P, W)
+
     for k in range(steps):
         P = hamiltonian(W)
-        K1 = commutator(P, W)
+        K1 = rhs(P, W)
 
         Wprime = W + (stepsize/2.0)*K1
         P = hamiltonian(Wprime)
-        K2 = commutator(P, Wprime)
+        K2 = rhs(P, Wprime)
 
         Wprime = W + (stepsize/2.0)*K2
         P = hamiltonian(Wprime)
-        K3 = commutator(P, Wprime)
+        K3 = rhs(P, Wprime)
 
         Wprime = W + stepsize*K3
         P = hamiltonian(Wprime)
-        K4 = commutator(P, Wprime)
+        K4 = rhs(P, Wprime)
 
         W += (stepsize/6.0)*(K1+2*K2+2*K3+K4)
 
@@ -419,7 +443,8 @@ def north_blob(N, sigma=0):
 
 def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
           method=rk4, method_kwargs=None,
-          callback=None, inner_steps=None, inner_qtime=None, inner_time=None, **kwargs):
+          callback=None, inner_steps=None, inner_qtime=None, inner_time=None,
+          progress_bar=True, progress_file=None, **kwargs):
     """
     High-level solve function.
 
@@ -449,6 +474,10 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
         Approximate qtime between each callback.
     inner_time: None or float
         Approximate time in seconds between each callback.
+    progress_bar: bool
+        Show progress bar (default: True)
+    progress_file: TextIOWrapper or None
+        File to write progress to (default: None)
     """
     N = W.shape[0]
 
@@ -457,7 +486,6 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
         method_kwargs = {}
     if 'hamiltonian' not in method_kwargs:
         method_kwargs['hamiltonian'] = solve_poisson
-    hamiltonian = method_kwargs['hamiltonian']
 
     # Determine steps
     if np.array([0 if x is None else 1 for x in [steps, qtime, time]]).sum() != 1:
@@ -492,18 +520,32 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
     k = 0
     qt = 0.0
 
+    # Create progressbar
+    if progress_bar:
+            try:
+                if progress_file is None:
+                    from tqdm.auto import tqdm
+                    pbar = tqdm(total=steps, unit=' steps')
+                else:
+                    from tqdm import tqdm
+                    pbar = tqdm(total=steps, unit=' steps', file=progress_file, ascii=True, mininterval=10.0)
+            except ModuleNotFoundError:
+                progress_bar = False
+
     # Main simulation loop
-    while True:
-        method(W, qstepsize, steps=inner_steps, hamiltonian=hamiltonian)
-        k += inner_steps
-        qt += inner_steps*qstepsize
+    for k in range(0, steps, inner_steps):
+        if k+inner_steps > steps:
+            no_steps = steps-k
+        else:
+            no_steps = inner_steps
+        method(W, qstepsize, steps=no_steps, **method_kwargs)
+        qt += no_steps*qstepsize
+        if progress_bar:
+            pbar.update(no_steps)
         if callback is not None:
             for cfun in callback:
                 cfun(W, qt, **kwargs)
-        if k >= steps:
-            break
-        elif k + inner_steps > steps:
-            method(W, qstepsize, steps=steps-k, hamiltonian=hamiltonian)
-            break
 
-
+    # Close progressbar
+    if progress_bar:
+        pbar.close()
