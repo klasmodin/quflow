@@ -88,72 +88,65 @@ def dot_tridiagonal(lap, P):
 
 
 @njit(parallel=True)
-def solve_tridiagonal_(lap, W, P, vtmp, ytmp):
+def solve_tridiagonal_numba(lap, W):
     """
-    Highly optimized function for solving the quantized
+    Function for solving the quantized
     Poisson equation (or more generally the equation defined by
-    the `lap` operator).
+    the `lap` array). Uses NUMBA to accelerate the
+    tridiagonal solver calculations.
 
     Parameters
     ----------
     lap: ndarray(shape=(N//2+1, 2, N), dtype=float)
-        Direct laplacian.
+        Tridiagonal laplacian.
     W: ndarray(shape=(N, N), dtype=complex)
         Input matrix.
+
+    Returns
+    -------
     P: ndarray(shape=(N, N), dtype=complex)
         Output matrix.
-    vtmp: ndarray(shape=(N//2+1, N), dtype=float)
-        Temporary float memory needed.
-    ytmp: ndarray(shape=(N//2+1, N), dtype=complex)
-        Temporary complex memory needed.
     """
     N = W.shape[0]
 
+    Wdiagh = mat2diagh(W)
+    Pdiagh = np.zeros_like(Wdiagh)
+
+    # For each double-tridiagonal, solve a tridiagonal system
     for m in prange(N//2+1):
-        n = N
-        start_ind = lap.shape[1]-n*(n+1)//2
-        end_ind = start_ind + n
-
         a = lap[m, 1, :-1]
-        b = lap[m, 0, :]
-        y = ytmp[m, :]
-        v = vtmp[m, :]
+        b = lap[m, 0, :].copy()
+        d = Wdiagh[m, :]
+        x = Pdiagh[m, :]
 
-        vk = b[0]
-        v[0] = vk
-        fk = W[0, m]
-        yk = fk
-        y[0] = yk
+        # Forward sweep
+        for i in range(1, N):
+            w = a[i-1]/b[i-1]
+            b[i] -= w*a[i-1]
+            d[i] -= w*d[i-1]
 
-        for k in range(1, n):
-            lk = a[k]/vk
-            fk = W[k, m+k]
-            yk = fk - lk*yk
-            y[k] = yk
-            vk = b[k] - lk*a[k]
-            v[k] = vk
+        # Backward sweep
+        x[N-1] = d[N-1]/b[N-1]
+        for i in range(N-2, -1, -1):
+            x[i] = (d[i] - a[i]*x[i+1])/b[i]
 
-        pk = y[n-1]/v[n-1]
-        P[n-1, m+n-1] = pk
-        if m != 0:
-            P[m+n-1, n-1] = -np.conj(pk)
+    # Make sure we preserve trace of W (corresponds to bc for laplacian)
+    trP = Pdiagh[0, :].sum()/N
+    trW = Wdiagh[0, :].sum()/N
+    Pdiagh[0, :] += trW - trP
 
-        for k in range(n-2, -1, -1):
-            pk = (y[k]-a[k+1]*pk)/v[k]
-            P[k, m+k] = pk
-            if m != 0:
-                P[m+k, k] = -np.conj(pk)
+    # Convert back to matrix
+    P = diagh2mat(Pdiagh)
 
-    trP = np.trace(P)/N
-    for k in prange(N):
-        P[k, k] -= trP
+    return P
 
 
-def solve_tridiagonal(lap, W):
+def solve_tridiagonal_lapack(lap, W):
     """
-    Highly optimized function for solving the quantized
+    Function for solving the quantized
     Poisson equation (or more generally the equation defined by
-    the `lap` direct matrix).
+    the `lap` array). Uses LAPACK as backend for
+    tridiagonal systems.
 
     Parameters
     ----------
@@ -187,13 +180,17 @@ def solve_tridiagonal(lap, W):
     return P
 
 
+# Set default tridiagonal solver
+solve_tridiagonal = solve_tridiagonal_numba
+
+
 # ----------------------
 # HIGHER LEVEL FUNCTIONS
 # ----------------------
 
 def laplacian(N, bc=False):
     """
-    Return quantized laplacian (as a direct laplacian).
+    Return quantized laplacian (as a tridiagonal laplacian).
 
     Parameters
     ----------
@@ -285,7 +282,7 @@ def solve_heat(h_times_nu, W0):
     else:
         heat = _tridiagonal_heat_cache[(N, h_times_nu)]
 
-    Wh = solve_tridiagonal(heat, W0)
+    Wh = solve_tridiagonal(-heat, -W0)  # Temporary sign fix since matrix should be pos def.
 
     return Wh
 
