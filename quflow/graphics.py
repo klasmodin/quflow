@@ -5,6 +5,7 @@ import matplotlib
 from matplotlib.pyplot import subplots
 from mpl_toolkits.axes_grid1 import ImageGrid
 import matplotlib.animation as anim
+from matplotlib.colors import hsv_to_rgb
 
 
 def in_notebook():
@@ -382,7 +383,7 @@ def plot(data, ax=None, symmetric=False, colorbar=True, use_ticks=True,
     return im
 
 
-def plot2(data, ax=None, projection=None, dpi=150, gridon=True, colorbar=False, title=None,
+def plot2(data, ax=None, projection=None, dpi=None, gridon=True, colorbar=False, title=None,
           xlabel="azimuth", ylabel="elevation", padding=None, N=None, **kwargs):
     """
     Better plot quantized function.
@@ -395,8 +396,8 @@ def plot2(data, ax=None, projection=None, dpi=150, gridon=True, colorbar=False, 
         Matplotlib axis to plot it (created if `None` which is default).
     projection: None or str
         Which projection to use.
-    dpi : int (default 150)
-        Resolution to use.
+    dpi : int or None (default)
+        Resolution to use. Default (=None) is to use current Matplotlib figure settings.
     colorbar: bool
         Whether to add colorbar to plot.
     title: str or None
@@ -434,17 +435,24 @@ def plot2(data, ax=None, projection=None, dpi=150, gridon=True, colorbar=False, 
 
         wpixels = fun.shape[1] + 2*padding
         hpixels = fun.shape[0] + 2*padding
-        default_title_height_pixels = round(25*dpi/100)
+        if dpi is None:
+            default_title_height_pixels = round(25)
+        else:
+            default_title_height_pixels = round(25*dpi/100)
         if title is not None:
             hpixels += default_title_height_pixels
         default_color_bar_width_frac = 0.03
         default_color_bar_pad_frac = 0.02
         if colorbar:
-            wpixels = round( (1+default_color_bar_width_frac+default_color_bar_pad_frac)*wpixels )
+            wpixels = round((1+default_color_bar_width_frac+default_color_bar_pad_frac)*wpixels)
             wpixels += 2*default_title_height_pixels
 
         # Create figure
-        figsize = (wpixels/float(dpi), hpixels/float(dpi))
+        if dpi is None:
+            figsize = plt.rcParams.get('figure.figsize')
+            figsize = (figsize[0], figsize[0]*hpixels/wpixels)
+        else:
+            figsize = (wpixels/float(dpi), hpixels/float(dpi))
         fig = plt.figure(figsize=figsize)
 
         # Create image axes
@@ -470,7 +478,7 @@ def plot2(data, ax=None, projection=None, dpi=150, gridon=True, colorbar=False, 
 
     # Check colormap
     if 'cmap' not in kwargs:
-        kwargs['cmap'] = 'RdBu'
+        kwargs['cmap'] = 'RdBu_r'
 
     # Create the plot
     lon = np.linspace(-np.pi, np.pi, fun.shape[1])
@@ -487,7 +495,8 @@ def plot2(data, ax=None, projection=None, dpi=150, gridon=True, colorbar=False, 
 
 
 def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_args=None,
-                      codec='h264', title='QUFLOW animation', **kwargs):
+                      codec='h264', title='QUFLOW animation',
+                      progress_bar=True, progress_file=None, **kwargs):
     """
     Parameters
     ----------
@@ -499,6 +508,8 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
     extra_args
     codec: str (default:'h264')
         ffmpeg codec. For accelerated Apple encoder, use 'h264_videotoolbox'
+    progress_bar
+    progress_file
     kwargs
         Sent to qf.plot(...)
 
@@ -535,13 +546,24 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
 
     with matplotlib.rc_context({'backend': 'Agg'}):
 
+        if 'dpi' not in kwargs:
+            kwargs['dpi'] = 100  # Default resolution
+
         im = plot2(f0, **kwargs)
 
         print("Writing file {}".format(filename))
         with writer.saving(im.figure, filename, dpi=100):
-            ndots = 40
-            print("_"*min(ndots, states.shape[0]))
-            for k in range(states.shape[0]):
+
+            if progress_bar and progress_file is None:
+                from tqdm.auto import trange
+                stepiter = trange(states.shape[0], unit=' frames')
+            elif progress_bar:
+                from tqdm import trange
+                stepiter = trange(states.shape[0], unit=' frames',
+                                  file=progress_file, ascii=True, mininterval=10.0)
+            else:
+                stepiter = range(states.shape[0])
+            for k in stepiter:
                 if N is not None:
                     omega = resample(states[k], N)
                 else:
@@ -555,9 +577,7 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
                 else:
                     raise NotImplementedError("Could not find method for setting data.")
                 writer.grab_frame()
-                if k % (max(states.shape[0], ndots)//ndots) == 0:
-                    print("*", end='')
-            print("")
+
         # Close figure (so it doesn't show up interactively)
         plt.close(fig=im.figure)
 
@@ -566,3 +586,33 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
         return Video(filename, embed=False)
     else:
         print("Finished!")
+
+
+def spy(W, colorbar=True, logscale=True):
+    """
+    Display the complex matrix elements using HSV colormap
+    with H=arg(W), S=1, V=abs(W).
+
+    Parameters
+    ----------
+    W: complex matrix
+    colorbar: bool
+    logscale: bool
+
+    Returns
+    -------
+    fig: matplotlib imshow object
+    """
+    Wabs = np.abs(W)
+    if logscale:
+        Wabs = np.log1p(Wabs)
+    hsv_im = np.stack(((np.angle(W)%(2*np.pi))/(2*np.pi),
+                        np.ones(W.shape),
+                        Wabs/Wabs.max()), axis=-1)
+    fig = plt.imshow(hsv_to_rgb(hsv_im))
+    plt.hsv()
+    if colorbar:
+        cbar = plt.colorbar(ticks=[0, 0.25, 0.5, 0.75, 1.0])
+        cbar.ax.set_yticklabels(['1', 'i', '–1', '–i', '1'])  # vertically oriented colorbar
+
+    return fig
