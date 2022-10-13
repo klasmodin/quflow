@@ -1,5 +1,6 @@
 import numpy as np
 import pyssht
+import os
 from numba import njit, prange
 
 
@@ -85,7 +86,7 @@ def ind2elm(ind):
     -------
     (el, m): tuple of indices
     """
-    el = int(np.floor(np.sqrt(ind)))
+    el = np.floor(np.sqrt(ind)).astype(int)
     m = ind - el * (el + 1)
     return el, m
 
@@ -212,6 +213,35 @@ def rotate(xi, W):
     return R@W@R.T.conj()
 
 
+def rotate2(xi, W):
+    """
+    Apply axis-angle (Rodrigues) rotation to vorticity matrix.
+    This directly uses Rodrigues' formula (not the matrix exponential).
+    This is under development and should not be used yet.
+
+    Parameters
+    ----------
+    xi: ndarray(shape=(3,), dtype=float)
+    W: ndarray(shape=(N,N), dtype=complex)
+
+    Returns
+    -------
+    W_rotated: ndarray(shape=(N,N), dtype=complex)
+    """
+    N = W.shape[0]
+    S1, S2, S3 = so3generators(N)
+
+    # Find out angle to rotate
+    theta = np.linalg.norm(xi)
+
+    # Apply Rodrigues' formula (see https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula#Matrix_notation)
+    K = (xi[0]*S1 + xi[1]*S2 + xi[2]*S3)/theta
+    R = np.eye(N) + np.sin(theta)*K + (1-np.cos(theta))*(K@K)
+
+    # Return rotation applied to W
+    return R@W@R.T.conj()
+
+
 def qtime2seconds(qtime, N):
     """
     Convert quantum time units to seconds.
@@ -242,3 +272,45 @@ def seconds2qtime(t, N):
     Time in quantum time units.
     """
     return t/np.sqrt(16.*np.pi)*N**(3./2.)
+
+
+def run_cluster(filename, time, inner_time, step_size):
+    """
+
+    Parameters
+    ----------
+    filename
+    time
+    inner_time
+    step_size
+
+    Returns
+    -------
+
+    """
+    from . import templates
+
+    # Read run file as string
+    with open(templates.__file__.replace("__init__.py","run_TEMPLATE.py"), 'r') as run_file:
+        run_str = run_file.read()\
+            .replace('_FILENAME_', filename)\
+            .replace('_SIMTIME_', str(time))\
+            .replace('_INNER_TIME_', str(inner_time))\
+            .replace('_STEP_SIZE_', str(step_size))\
+            .replace('_SIMULATE_', 'True')\
+            .replace('_ANIMATE_', 'True')
+
+    # Read vera file as string
+    with open(templates.__file__.replace("__init__.py","vera2_TEMPLATE.sh"), 'r') as vera_file:
+        simname = os.path.split(filename)[1].replace(".hdf5", "")
+        vera_str = vera_file.read()\
+            .replace('$SIMNAME', simname)\
+            .replace('$NO_CORES', '16')
+
+    # Write run file
+    with open(os.path.join(os.path.split(filename)[0], "run_"+simname+".py"), 'w') as run_file:
+        run_file.write(run_str)
+
+    # Write vera file
+    with open(os.path.join(os.path.split(filename)[0], "vera2_"+simname+".sh"), 'w') as vera_file:
+        vera_file.write(vera_str)
