@@ -4,10 +4,12 @@
 #SBATCH -J $SIMNAME # name of job
 #SBATCH -n $NO_CORES # number of cores to use
 #SBATCH -N 1 # Use maximum 1 node
+#SBATCH -C SKYLAKE # Use SKYLAKE (slower) or ICELAKE (faster)
+#SBATCH --reservation=rocky8
 
 module load GCCcore
 module load FFmpeg
 module load Anaconda3
 
 
-python ./run_$SIMNAME.py > results_$SIMNAME.out
+python ./$RUNFILE > $SIMNAME_results.out

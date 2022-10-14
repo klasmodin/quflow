@@ -551,7 +551,6 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
 
         im = plot2(f0, **kwargs)
 
-        print("Writing file {}".format(filename))
         with writer.saving(im.figure, filename, dpi=100):
 
             if progress_bar and progress_file is None:
@@ -584,8 +583,6 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
     if in_notebook():
         from IPython.display import Video
         return Video(filename, embed=False)
-    else:
-        print("Finished!")
 
 
 def spy(W, colorbar=True, logscale=True):
