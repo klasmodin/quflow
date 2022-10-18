@@ -118,12 +118,16 @@ def solve(filename,
     if server is None:
         server = _DEFAULT_SERVER_
 
+    # Get simname
+    simname = get_simname(filename)
+
     # Check if simulation is currently running
     if upload or submit:
-        status_sim, status_anim = status(filename, verbatim=False)
-        if (status_sim is not None and "100%" not in status_sim) or \
-                (status_anim is not None and "100%" not in status_anim):
-            raise RuntimeError("It appears that file {} is currently running on {}. Aborting.".format(filename, server))
+        if os.path.isfile(os.path.join(os.path.basename(filename),simname+'_args.pickle')):
+            status_sim, status_anim = status(filename, verbatim=False)
+            if (status_sim is not None and "100%" not in status_sim) or \
+                    (status_anim is not None and "100%" not in status_anim):
+                raise RuntimeError("It appears that file {} is currently running on {}. Aborting.".format(filename, server))
 
     # Pickle dynamics.solve arguments
     clusterargs = dict()
@@ -134,7 +138,6 @@ def solve(filename,
     clusterargs['server_prefix'] = server_prefix
     clusterargs['cores'] = cores
 
-    simname = get_simname(filename)
     args_file = os.path.join(os.path.dirname(filename), simname+'_args.pickle')
     if 'callback' in kwargs:
         RuntimeWarning('cluster.solve(...) does not allow callbacks. Ignoring.')
@@ -145,7 +148,7 @@ def solve(filename,
     # Create run template string
     if run_template is None:
         from . import templates
-        with open(templates.__file__.replace("__init__.py","run_TEMPLATE.py")) as f:
+        with open(templates.__file__.replace("__init__.py", "run_TEMPLATE.py")) as f:
             run_template_str = f.read()
 
     # Create bash template string
@@ -168,8 +171,8 @@ def solve(filename,
     remote_folder = os.path.join(server_prefix, simname, '')
     remote_files = []
     remote_files += [os.path.join(remote_folder, os.path.basename(filename))]
-    remote_files += [os.path.join(remote_folder, simname+"_progress.txt")]
-    remote_files += [os.path.join(remote_folder, simname+"_anim_progress.txt")]
+    # remote_files += [os.path.join(remote_folder, simname+"_progress.txt")]
+    # remote_files += [os.path.join(remote_folder, simname+"_anim_progress.txt")]
     remote_files += [os.path.join(remote_folder, simname+".mp4")]
 
     # If upload flag, then upload
@@ -281,6 +284,12 @@ def status(filename, verbatim=True):
 
     status_str = None
     status_anim_str = None
+
+    # Check ssh connection to server
+    try:
+        subprocess.check_call([_SSH_COMMAND_, server, 'echo', 'hej'])
+    except subprocess.CalledProcessError:
+        RuntimeError("Connection to server {} failed.".format(server))
 
     # Check progress of simulation
     remote_progress_file = os.path.join(remote_folder, simname+"_progress.txt")
