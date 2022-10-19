@@ -11,5 +11,4 @@ module load GCCcore
 module load FFmpeg
 module load Anaconda3
 
-
 python ./$RUNFILE > $SIMNAME_results.out
