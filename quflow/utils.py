@@ -4,6 +4,45 @@ import os
 from numba import njit, prange
 
 
+def poisson_finite_differences(omegafun, psifun):
+    """
+    Compute approximation of Poisson bracket using finite differences.
+    This is just to test against traditional methods.
+
+    Parameters
+    ----------
+    omegafun: ndarray, shape=(N,2*N-1)
+    psifun: ndarray, shape=(N,2*N-1)
+
+    Returns
+    -------
+    Approximation to Poisson bracket {omegafun, psifun}.
+    """
+    N = omegafun.shape[0]
+    thetafun, phifun = sphgrid(N)
+
+    dtheta_omega = np.zeros_like(omegafun)
+    dphi_omega = np.zeros_like(omegafun)
+    dtheta_psi = np.zeros_like(psifun)
+    dphi_psi = np.zeros_like(psifun)
+
+    dtheta_omega[1:N, :] = np.diff(omegafun, n=1, axis=0)/np.diff(thetafun, n=1, axis=0)
+    dtheta_omega[0, :] = dtheta_omega[1, :]
+    dphi_omega[:, :] = np.diff(omegafun, n=1, axis=1, append=omegafun[:, 0].reshape((N, 1)))/(phifun[0, 1] - phifun[0, 0])
+
+    dtheta_psi[1:N, :] = np.diff(psifun, n=1, axis=0)/np.diff(thetafun, n=1, axis=0)
+    dtheta_psi[0, :] = dtheta_psi[1, :]
+    dphi_psi[:, :] = np.diff(psifun, n=1, axis=1, append=psifun[:, 0].reshape((N, 1)))/(phifun[0, 1] - phifun[0, 0])
+
+    sinth = np.sin(thetafun)
+    # sinth[:2, :] = sinth[2, :]
+    sinth[-2:, :] = sinth[-2, :]
+    br = (dtheta_psi*dphi_omega - dtheta_omega*dphi_psi)/sinth
+    br[-2:, :] = br[-2, :]
+
+    return br
+
+
 @njit
 def mat2diagh(W):
     """
@@ -190,7 +229,7 @@ def so3generators(N):
         1j*np.diag(np.sqrt(s*(s+1)-np.arange(-s, s)*np.arange(-s+1, s+1)), -1)/2
     S2 = np.diag(np.sqrt(s*(s+1)-np.arange(-s, s)*np.arange(-s+1, s+1)), 1)/2 - \
         np.diag(np.sqrt(s*(s+1)-np.arange(-s, s)*np.arange(-s+1, s+1)), -1)/2
-    return S1, S2, S3
+    return S1, S2.astype(np.complex128), S3
 
 
 def rotate(xi, W):

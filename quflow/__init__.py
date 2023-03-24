@@ -6,4 +6,4 @@ from .dynamics import *
 from .io import *
 from . import laplacian
 
-__version__ = '0.0.2'
+__version__ = '0.0.3'

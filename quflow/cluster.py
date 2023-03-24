@@ -3,6 +3,8 @@ import os
 import pickle
 import subprocess
 import quflow as qf
+import warnings
+import h5py
 
 # ----------------
 # GLOBAL VARIABLES
@@ -13,15 +15,14 @@ _SERVER_PREFIX_ = "simulations"
 # _DEFAULT_SERVER_ = "moklas@vera2.c3se.chalmers.se"
 _RSYNC_COMMAND_ = 'rsync'
 _SSH_COMMAND_ = 'ssh'
-_RSYNC_UPLOAD_ARGS_ = '-auv'
-_RSYNC_DOWNLOAD_ARGS_ = '-auv'
+_RSYNC_UPLOAD_ARGS_ = "-au"
+_RSYNC_DOWNLOAD_ARGS_ = "-auv"
 _BASH_SHEBANG_ = '#!/bin/bash'
 
 
 # ----------------
 # HELP FUNCTIONS
 # ----------------
-
 
 def get_simname(filename):
     return os.path.splitext(os.path.basename(filename))[0]
@@ -55,6 +56,10 @@ def get_argsfile(filename, remote=False):
     return get_file(filename, "_args.pickle", remote=remote)
 
 
+def get_clusterfile(filename, remote=False):
+    return get_file(filename, "_cluster.pickle", remote=remote)
+
+
 def get_jobsfile(filename, remote=False):
     return get_file(filename, "_jobs.txt", remote=remote)
 
@@ -70,7 +75,33 @@ def get_progressfile(filename, remote=True, anim=False):
     return get_file(filename, ending, remote=remote)
 
 
-def create_script_files(filename, run_template_str, bash_template_str, cores):
+def get_clusterargs(filename):
+    """
+    Return dict of cluster args for `filename`.
+    Returns `None` if the cluster files doesn't exist.
+
+    Parameters
+    ----------
+    filename: str
+
+    Returns
+    -------
+    dict or None
+    """
+
+    # Check if args file exists.
+    if os.path.isfile(get_clusterfile(filename)):
+
+        # Load args
+        with open(get_clusterfile(filename), 'rb') as f:
+            clusterargs = pickle.load(f)
+
+    else:
+        clusterargs = None
+    return clusterargs
+
+
+def create_script_files(filename, run_template_str, bash_template_str, cores, prerun):
     """
 
     Parameters
@@ -79,6 +110,7 @@ def create_script_files(filename, run_template_str, bash_template_str, cores):
     run_template_str
     bash_template_str
     cores
+    prerun
 
     Returns
     -------
@@ -87,6 +119,10 @@ def create_script_files(filename, run_template_str, bash_template_str, cores):
 
     # Prepare run string
     run_str = run_template_str.replace('_FILENAME_', os.path.basename(filename))
+
+    # Insert prerun code
+    prerun = "\n".join([l for l in prerun.strip().split("\n") if "In[" not in l])
+    run_str = run_str.replace("#_PRERUNCODE_", prerun)
 
     # Write run file
     runfile = get_runfile(filename)
@@ -107,6 +143,20 @@ def create_script_files(filename, run_template_str, bash_template_str, cores):
     return runfile, submitfile
 
 
+def get_auto_cores(filename):
+    with h5py.File(filename, "r") as data:
+        N = round(np.sqrt(data['state'][0].shape[0]))
+    if N <= 256:
+        cores = 2
+    elif N <= 512:
+        cores = 4
+    elif N <= 1024:
+        cores = 8
+    else:
+        cores = 16
+    return cores
+
+
 # --------------------
 # HIGH LEVEL FUNCTIONS
 # --------------------
@@ -121,7 +171,8 @@ def solve(filename,
           run_template=None,
           bash_template=None,
           upload_quflow=True,
-          cores=2,
+          cores='auto',
+          prerun="# No prerun code provided",
           **kwargs):
     """
 
@@ -147,8 +198,10 @@ def solve(filename,
         Template for run file (default: None).
     bash_template: str or file or None
         Template for submit script (default: None).
-    cores: int
-        Number of cores to use (default: 16).
+    cores: int or 'auto'
+        Number of cores to use (default: 'auto').
+    prerun: str
+        Code to run in run script prior to simulation.
     kwargs
         Named arguments to send to dynamics.solve.
 
@@ -158,6 +211,10 @@ def solve(filename,
     if not os.path.isfile(filename):
         raise FileNotFoundError("Couldn't find file {}.".format(filename))
 
+    # Check cores
+    if cores == 'auto':
+        cores = get_auto_cores(filename)
+
     # Check server
     if server is None:
         server = _DEFAULT_SERVER_
@@ -165,7 +222,7 @@ def solve(filename,
     # Set global variables
     global _SERVER_, _SERVER_PREFIX_
     _SERVER_ = server
-    _SERVER_PREFIX_ = server_prefix
+    _SERVER_PREFIX_ = os.path.join(server_prefix, get_simname(filename))
 
     # Check if simulation is currently running
     if upload or submit:
@@ -181,7 +238,7 @@ def solve(filename,
     # Get remote folder
     remote_folder = os.path.dirname(get_file(filename, remote=True))
 
-    # Pickle arguments
+    # Variables related to cluster
     clusterargs = dict()
     clusterargs['animate'] = animate
     clusterargs['submit'] = submit
@@ -190,16 +247,12 @@ def solve(filename,
     clusterargs['remote_folder'] = remote_folder
     clusterargs['cores'] = cores
 
-    if 'callback' in kwargs:
-        RuntimeWarning('cluster.solve(...) does not allow callbacks. Ignoring.')
-        kwargs.pop('callback')
-    with open(get_argsfile(filename), 'wb') as f:
-        pickle.dump((kwargs, clusterargs), f)
-
     # Create run template string
-    if run_template is None:
+    if run_template is None or not os.path.isfile(run_template):
         from . import templates
-        with open(os.path.join(os.path.dirname(templates.__file__), "run_TEMPLATE.py"), 'r') as f:
+        if run_template is None:
+            run_template = "run_TEMPLATE.py"
+        with open(os.path.join(os.path.dirname(templates.__file__), run_template), 'r') as f:
             run_template_str = f.read()
 
     # Create bash template string
@@ -209,40 +262,54 @@ def solve(filename,
             bash_template_str = f.read()
 
     # Create run and bash files
-    runfile, submitfile = create_script_files(filename, run_template_str, bash_template_str, cores)
+    runfile, submitfile = create_script_files(filename, run_template_str, bash_template_str, cores, prerun)
 
     # Print header
     print("########### DONE ###########\n")
 
+    # Create list of local files to sync with server
+    upload_files = {'filename': filename, 'runfile': runfile,
+                    'submitfile': submitfile, 'argsfile': get_argsfile(filename),
+                    'clusterfile': get_clusterfile(filename)}
+    clusterargs['upload_files'] = upload_files
+
+    # Create string for remote files to sync with local
+    download_files = {'filename': get_file(filename, remote=True),
+                      'animfile': get_animfile(filename, remote=True)}
+    clusterargs['download_files'] = download_files
+
+    if 'callback' in kwargs:
+        warnings.warn('cluster.solve(...) does not allow callbacks. Ignoring.')
+        kwargs.pop('callback')
+    with open(get_argsfile(filename), 'wb') as f:
+        pickle.dump(kwargs, f)
+    with open(get_clusterfile(filename), 'wb') as f:
+        pickle.dump(clusterargs, f)
+
     # ----------------------
     # Upload files on server
     # ----------------------
-
-    # Create list of local files to sync with server
-    upload_files = [filename, runfile, submitfile, get_argsfile(filename)]
-
-    # Create string for remote files to sync with local
-    download_files = [get_file(filename, remote=True), get_animfile(filename, remote=True)]
-
-    # If upload flag, then upload
     if upload:
 
         # Print header
         print("#### UPLOADING FILES TO SERVER ####")
 
-        for file in upload_files:
-            # Check that all files exist
+        # Check that all files exist
+        for file in upload_files.values():
             if not os.path.isfile(file):
                 raise FileNotFoundError("The file {} to be uploaded was not found.".format(file))
+
+        # Run rsync command
         cmd = [_RSYNC_COMMAND_, _RSYNC_UPLOAD_ARGS_]
-        cmd += upload_files + [server+":"+remote_folder]
+        cmd += list(upload_files.values()) + [server+":"+remote_folder]
         print("> " + " ".join(cmd))
         subprocess.run(cmd, check=True, text=True)
 
         # Upload quflow module
         if upload_quflow:
-            print('Uploading quflow to server.')
             cmd = [_RSYNC_COMMAND_, _RSYNC_UPLOAD_ARGS_]
+            cmd += ["--exclude", "__pycache__"]
+            cmd += ["--exclude", ".DS_Store"]
             cmd += [os.path.dirname(qf.__file__)] + [server+":"+remote_folder]
             print("> " + " ".join(cmd))
             subprocess.run(cmd, check=True, text=True)
@@ -250,12 +317,11 @@ def solve(filename,
         # Print header
         print("############### DONE ##############\n")
 
-
     # Create upload script
     upload_str = _BASH_SHEBANG_ + "\n"
     upload_str += _RSYNC_COMMAND_
     upload_str += " " + _RSYNC_UPLOAD_ARGS_
-    upload_str += " " + " ".join([os.path.basename(s) for s in upload_files])
+    upload_str += " " + " ".join([os.path.basename(s) for s in upload_files.values()])
     upload_str += " " + remote_folder
     upload_str += "\n"
     with open(get_uploadfile(filename), 'w') as f:
@@ -265,7 +331,7 @@ def solve(filename,
     download_str = _BASH_SHEBANG_ + "\n"
     download_str += _RSYNC_COMMAND_
     download_str += " " + _RSYNC_DOWNLOAD_ARGS_
-    download_str += " " + server + ":'" + " ".join(download_files) + "'"
+    download_str += " " + server + ":'" + " ".join(list(download_files.values())) + "'"
     download_str += " ./"
     download_str += "\n"
     with open(get_downloadfile(filename), 'w') as f:
@@ -281,7 +347,7 @@ def solve(filename,
         print("#### SUBMITTING JOB ON SERVER ####")
 
         # Check if needed files exist on server
-        for file in upload_files:
+        for file in upload_files.values():
             remote_file = get_file(file, remote=True)
             cp = subprocess.run([_SSH_COMMAND_, server, 'test', '-f', remote_file], text=True)
             if cp.returncode != 0:
@@ -334,7 +400,7 @@ def solve(filename,
                     f.write(str(jobid))
 
         # Print header
-        print("############## DONE ##############")
+        print("############## DONE ##############\n")
 
 
 def run_script(filename, subname):
@@ -348,8 +414,28 @@ def run_script(filename, subname):
         RuntimeError("Not able to run {}.".format(script_file))
 
 
-def retrieve(filename):
-    run_script(filename, "download")
+def retrieve(filename, onlyanim=False):
+    # Old code:
+    # run_script(filename, "download")
+
+    # Check if args file exists.
+    clusterargs = get_clusterargs(filename)
+    if clusterargs is not None:
+
+        # Specify files to download
+        download_files = clusterargs['download_files']
+        if onlyanim:
+            download_files.pop('filename')
+
+        # Run rsync
+        server = clusterargs['server']
+        cmd = [_RSYNC_COMMAND_, _RSYNC_DOWNLOAD_ARGS_]
+        cmd += [server+":'{}'".format(" ".join(list(download_files.values())))]
+        cmd += [os.path.dirname(filename) if os.path.dirname(filename) != '' else '.']
+        print("> " + " ".join(cmd))
+        cp = subprocess.run(" ".join(cmd), text=True, check=True, shell=True)
+    else:
+        raise FileNotFoundError("File {} not found".format(get_argsfile(filename)))
 
 
 def ssh_connection(server):
@@ -368,18 +454,47 @@ def jobstatus(server=None, verbatim=True):
         return cp.stdout.strip()
 
 
+def delete(filename, remote=True, local=False):
+    """
+    Delete files remotely and/or locally.
+
+    Parameters
+    ----------
+    filename: str
+    remote: bool
+    local: bool
+    """
+
+    clusterargs = get_clusterargs(filename)
+
+    # Check if args file exists.
+    if clusterargs is not None:
+        if local:
+            raise NotImplementedError
+        if remote:
+            remote_folder = clusterargs['remote_folder']
+            server = clusterargs['server']
+
+            # Command to remote folder
+            cmd = [_SSH_COMMAND_, server, 'rm', '-rf', remote_folder]
+
+            # Run command on server
+            print("> {}".format(" ".join(cmd)))
+            cp = subprocess.run(cmd, text=True, check=True)
+    else:
+        print("No simulation data for {} found".format(filename))
+
+
 def status(filename, verbatim=True):
 
     # This indicates no status can be reported.
     status_str = None
     status_anim_str = None
 
-    # Check if args file exists.
-    if os.path.isfile(get_argsfile(filename)):
+    clusterargs = get_clusterargs(filename)
 
-        # Load args
-        with open(get_argsfile(filename), 'rb') as f:
-            (kwargs, clusterargs) = pickle.load(f)
+    # Check if args file exists.
+    if clusterargs is not None:
 
         # Assign variables
         server = clusterargs['server']
@@ -394,7 +509,6 @@ def status(filename, verbatim=True):
                     jobid = f.read().strip()
             except FileNotFoundError:
                 job_str = "n/a"
-                Warning("Could not establish jobstatus.")
             else:
                 # Set job str
                 job_str = "running" if jobid in jobstatus(server, verbatim=False) else "not running"
@@ -402,19 +516,20 @@ def status(filename, verbatim=True):
             for anim in (False, True):
 
                 # Run tail -1 command on progress file on server
-                cp = subprocess.run([_SSH_COMMAND_, server, 'tail', '-1',
-                                     get_progressfile(filename, remote=True, anim=anim)],
+                progressfile = os.path.join(remote_folder,
+                                            os.path.basename(get_progressfile(filename, remote=True, anim=anim)))
+                cp = subprocess.run([_SSH_COMMAND_, server, 'tail', '-1', progressfile],
                                     text=True, capture_output=True)
 
                 # Check output from stdout
                 if cp.returncode == 0:
                     if anim:
-                        status_anim_str = cp.stdout.strip().split('\n')[-1] + " (jobstatus: {})".format(job_str)
+                        status_anim_str = cp.stdout.rstrip().split('\n')[-1] + " (jobstatus: {})".format(job_str)
                     else:
-                        status_str = cp.stdout.strip().split('\n')[-1] + " (jobstatus: {})".format(job_str)
+                        status_str = cp.stdout.rstrip().split('\n')[-1] + " (jobstatus: {})".format(job_str)
 
         else:
-            Warning("Could not establish ssh connection.")
+            warnings.warn("Could not establish ssh connection.")
     if verbatim:
         print("Simulation: {}".format("n/a" if status_str is None else status_str))
         print(" Animation: {}".format("n/a" if status_anim_str is None else status_anim_str))

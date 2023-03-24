@@ -383,8 +383,9 @@ def plot(data, ax=None, symmetric=False, colorbar=True, use_ticks=True,
     return im
 
 
-def plot2(data, ax=None, projection=None, dpi=None, gridon=True, colorbar=False, title=None,
-          xlabel="azimuth", ylabel="elevation", padding=None, N=None, **kwargs):
+def plot2(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=False, title=None,
+          xlabel="azimuth", ylabel="elevation", padding=None, N=None,
+          central_latitude=20, central_longitude=30, **kwargs):
     """
     Better plot quantized function.
 
@@ -395,7 +396,7 @@ def plot2(data, ax=None, projection=None, dpi=None, gridon=True, colorbar=False,
     ax:
         Matplotlib axis to plot it (created if `None` which is default).
     projection: None or str
-        Which projection to use.
+        Which projection to use. `None` gives spherical coordinates.
     dpi : int or None (default)
         Resolution to use. Default (=None) is to use current Matplotlib figure settings.
     colorbar: bool
@@ -410,6 +411,10 @@ def plot2(data, ax=None, projection=None, dpi=None, gridon=True, colorbar=False,
         Amount (in pixels) of extra padding around image.
     N: int or None (default None)
         Up- or downsample to resolution N in plot.
+    central_latitude: float (default 20)
+        Latitude orientation (in degrees) for `projections='orthographic'`.
+    central_longitude: float (default 30)
+        Longitude orientation (in degrees) for `projections='orthographic'`.
     kwargs:
         Arguments to send to `ax.pcolormesh(...)`.
 
@@ -417,6 +422,9 @@ def plot2(data, ax=None, projection=None, dpi=None, gridon=True, colorbar=False,
     -------
         Object returned by `ax.pcolormesh(...)`.
     """
+
+    import cartopy.crs as ccrs
+    use_cartopy = False
 
     # Convert and resample data if needed.
     if N is not None:
@@ -435,6 +443,23 @@ def plot2(data, ax=None, projection=None, dpi=None, gridon=True, colorbar=False,
 
         wpixels = fun.shape[1] + 2*padding
         hpixels = fun.shape[0] + 2*padding
+
+        # Check projection type
+        square_fig = False
+        if projection == "orthographic":
+            projection = ccrs.Orthographic(central_latitude=central_latitude,
+                                           central_longitude=central_longitude)
+            wpixels = hpixels
+            square_fig = True
+        elif projection == "perspective":
+            projection = ccrs.NearsidePerspective(central_latitude=central_latitude,
+                                                  central_longitude=central_longitude)
+            wpixels = hpixels
+            square_fig = True
+        if isinstance(projection, ccrs.CRS):
+            # Cartopy object
+            use_cartopy = True
+
         if dpi is None:
             default_title_height_pixels = round(25)
         else:
@@ -455,11 +480,13 @@ def plot2(data, ax=None, projection=None, dpi=None, gridon=True, colorbar=False,
             figsize = (wpixels/float(dpi), hpixels/float(dpi))
         fig = plt.figure(figsize=figsize)
 
-        # Create image axes
+        # Define axes
         left = padding/wpixels
         bottom = padding/hpixels
-        width = fun.shape[1]/wpixels
         height = fun.shape[0]/hpixels
+        width = fun.shape[1]/wpixels if not square_fig else height
+
+        # Create image axes
         ax = fig.add_axes([left, bottom, width, height], projection=projection)
         if title:
             ax.set_title(title)
@@ -481,11 +508,21 @@ def plot2(data, ax=None, projection=None, dpi=None, gridon=True, colorbar=False,
         kwargs['cmap'] = 'RdBu_r'
 
     # Create the plot
-    lon = np.linspace(-np.pi, np.pi, fun.shape[1])
+    lon = np.linspace(-np.pi, np.pi, fun.shape[1], endpoint=False)
     lat = np.linspace(-np.pi/2., np.pi/2., fun.shape[0])
+    gridargs = {'color': 'black', 'alpha': 0.2}
+    if use_cartopy:
+        lon *= 360/(2*np.pi)
+        lat *= 360/(2*np.pi)
+        if 'transform' not in kwargs:
+            kwargs['transform'] = ccrs.PlateCarree()
+    # lon, lat = np.meshgrid(lon, lat)
     im = ax.pcolormesh(lon, lat, fun, rasterized=True, **kwargs)
     if gridon:
-        ax.grid(linestyle='-', color='black', alpha=0.2)
+        if use_cartopy:
+            ax.gridlines(draw_labels=False, dms=True, **gridargs)
+        else:
+            ax.grid(linestyle='-', **gridargs)
     ax.set_xticklabels([])
     ax.set_yticklabels([])
     if colorbar:
@@ -572,7 +609,7 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
                 if hasattr(im, 'set_data'):
                     im.set_data(fun)
                 elif hasattr(im, 'set_array'):
-                    im.set_array(fun)
+                    im.set_array(fun.ravel())
                 else:
                     raise NotImplementedError("Could not find method for setting data.")
                 writer.grab_frame()
@@ -585,7 +622,7 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
         return Video(filename, embed=False)
 
 
-def spy(W, colorbar=True, logscale=True):
+def spy(W, colorbar=True, logscale=True, ax=None):
     """
     Display the complex matrix elements using HSV colormap
     with H=arg(W), S=1, V=abs(W).
@@ -595,21 +632,23 @@ def spy(W, colorbar=True, logscale=True):
     W: complex matrix
     colorbar: bool
     logscale: bool
+    ax: Axes
 
     Returns
     -------
     fig: matplotlib imshow object
     """
+    if ax is None:
+        fig, ax = plt.subplots(ncols=1, nrows=1)
     Wabs = np.abs(W)
     if logscale:
         Wabs = np.log1p(Wabs)
     hsv_im = np.stack(((np.angle(W)%(2*np.pi))/(2*np.pi),
                         np.ones(W.shape),
                         Wabs/Wabs.max()), axis=-1)
-    fig = plt.imshow(hsv_to_rgb(hsv_im))
-    plt.hsv()
+    im = ax.imshow(hsv_to_rgb(hsv_im), cmap='hsv')
     if colorbar:
-        cbar = plt.colorbar(ticks=[0, 0.25, 0.5, 0.75, 1.0])
+        cbar = ax.figure.colorbar(im, ticks=[0, 0.25, 0.5, 0.75, 1.0])
         cbar.ax.set_yticklabels(['1', 'i', '–1', '–i', '1'])  # vertically oriented colorbar
 
-    return fig
+    return im
