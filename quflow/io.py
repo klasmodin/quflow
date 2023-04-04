@@ -209,7 +209,7 @@ def determine_qtype(data, N=None):
 
 class QuData(object):
 
-    def __init__(self, filename, datapath="/", cache_size=1, verbatim=False, max_wait=3600.0):
+    def __init__(self, filename, datapath="/", cache_size=1, verbatim=False, max_wait=3600.0, qtype="shr"):
         self.filename = filename
         if len(datapath) == 0 or datapath[-1] != '/':
             datapath += '/'
@@ -226,6 +226,7 @@ class QuData(object):
         attrs['qtime_cache'] = None
         attrs['cache_steps'] = 0
         attrs['total_steps'] = 0
+        attrs['qtype'] = qtype
         assert cache_size >= 1, "Cache size must be larger than 1."
         attrs['cache_size'] = cache_size
 
@@ -301,7 +302,7 @@ class QuData(object):
         self.last_write_time = time.time()
         if self.cache_steps != 0:
             save(self.filename, self.W_cache[:self.cache_steps], qtime=self.qtime_cache[:self.cache_steps],
-                 N=self.W_cache[0].shape[0], datapath=self.datapath)
+                 N=self.W_cache[0].shape[0], datapath=self.datapath, qtype=self.qtype)
             self.cache_steps = 0
             if self.verbatim:
                 print("Cached data saved to file {}".format(self.filename))
@@ -348,6 +349,7 @@ def save(filename, data, qtime=None, qstepsize=None, N=None, qtype="shr", datapa
 
     with h5py.File(filename, "a") as f:
         from .transforms import as_shr
+        from .quantization import mat2shc
         from . import __version__
 
         # Process the datapath
@@ -365,25 +367,31 @@ def save(filename, data, qtime=None, qstepsize=None, N=None, qtype="shr", datapa
         if data_qtype is None or is_seq is None:
             raise ValueError("Could not determine qtype of data. Try specifying the N parameter.")
 
-        if qtype == "shr":
+        if qtype == "shr" or qtype == "shc":
 
             # Process data (convert to shr if needed)
             if not is_seq:
                 data = data.reshape((1,)+data.shape)
-            if data_qtype == "shr":
-                omegar = data
+            if data_qtype == "shr" or data_qtype == "shc":
+                omega = data
             else:
-                omegar = []
+                omega = []
                 for d in data:
-                    omegar.append(as_shr(d))
-                omegar = np.array(omegar)
+                    if qtype == "shc":
+                        if d.ndim == 2:
+                            omega.append(mat2shc(d))
+                        else:
+                            raise ValueError("Something wrong with the input data.")
+                    else:
+                        omega.append(as_shr(d))
+                omega = np.array(omega)
 
             # Check input
             if qtime is not None and qstepsize is not None:
                 raise ValueError("Cannot specify both qtime and qstepsize.")
             if is_seq and qtime is not None:
                 qtime = np.asarray(qtime)
-                assert qtime.shape[0] == omegar.shape[0], "Length of qtime and data are not corresponding."
+                assert qtime.shape[0] == omega.shape[0], "Length of qtime and data are not corresponding."
             if not is_seq and np.isscalar(qtime):
                 qtime = np.array([qtime])
 
@@ -393,20 +401,20 @@ def save(filename, data, qtime=None, qstepsize=None, N=None, qtype="shr", datapa
 
             # Check if state data should be allocated
             if statepath not in f:
-                stateset = f.create_dataset(statepath, (0, omegar.shape[-1]),
-                                            dtype=omegar.dtype,
-                                            maxshape=(None, omegar.shape[-1]),
-                                            chunks=(1, omegar.shape[-1])
+                stateset = f.create_dataset(statepath, (0, omega.shape[-1]),
+                                            dtype=omega.dtype,
+                                            maxshape=(None, omega.shape[-1]),
+                                            chunks=(1, omega.shape[-1])
                                             )
                 if N is not None:
-                    assert N == round(np.sqrt(omegar.shape[-1]))
+                    assert N == round(np.sqrt(omega.shape[-1]))
                 else:
-                    N = round(np.sqrt(omegar.shape[-1]))
+                    N = round(np.sqrt(omega.shape[-1]))
                 f[datapath].attrs["N"] = N
                 f[datapath].attrs["version"] = __version__
                 f[datapath].attrs["created"] = datetime.datetime.now().isoformat()
-                stateset.attrs["qtype"] = "shr"
-            elif f[statepath].shape[-1] != omegar.shape[-1] or f[statepath].ndim != 2:
+                stateset.attrs["qtype"] = qtype
+            elif f[statepath].shape[-1] != omega.shape[-1] or f[statepath].ndim != 2:
                 raise ValueError("The file qtype does not seem to be correct.")
 
             # Check if qtime and time data should be allocated
@@ -426,24 +434,24 @@ def save(filename, data, qtime=None, qstepsize=None, N=None, qtype="shr", datapa
                 raise ValueError("The qtimes data does not seem to be correct.")
 
             # Resize data sets
-            f[statepath].resize(f[statepath].shape[0]+omegar.shape[0], axis=0)
+            f[statepath].resize(f[statepath].shape[0]+omega.shape[0], axis=0)
             f[qtimepath].resize(f[statepath].shape[0], axis=0)
             f[timepath].resize(f[statepath].shape[0], axis=0)
 
             # Assign newly allocated state data
-            f[statepath][-omegar.shape[0]:, :] = omegar
+            f[statepath][-omega.shape[0]:, :] = omega
 
             # Assign newly allocated qtime and time data
             if qtime is None:
                 if qstepsize is None:
                     qstepsize = 1.0
-                if f[qtimepath].shape[0] == omegar.shape[0]:
-                    qtime = qstepsize*np.arange(omegar.shape[0], dtype=float)
+                if f[qtimepath].shape[0] == omega.shape[0]:
+                    qtime = qstepsize*np.arange(omega.shape[0], dtype=float)
                 else:
-                    qtime = f[qtimepath][-omegar.shape[0]-1]+qstepsize*np.arange(1, 1+omegar.shape[0], dtype=float)
+                    qtime = f[qtimepath][-omega.shape[0]-1]+qstepsize*np.arange(1, 1+omega.shape[0], dtype=float)
 
-            f[qtimepath][-omegar.shape[0]:] = qtime
-            f[timepath][-omegar.shape[0]:] = qtime2seconds(f[qtimepath][-omegar.shape[0]:], N)
+            f[qtimepath][-omega.shape[0]:] = qtime
+            f[timepath][-omega.shape[0]:] = qtime2seconds(f[qtimepath][-omega.shape[0]:], N)
 
             # Add attributs to stateset if there are any
             if attrs:
@@ -474,8 +482,12 @@ def load(filename, datapath="state", qtype="shr"):
     if filename[-4:] == "hdf5":
         f = h5py.File(filename, "r")
 
-        if qtype == "shr":
-            return f[datapath]
+        # TODO: This is a slight bug, since we're not checking what
+        if qtype == "shr" or qtype == "shc":
+            if f[datapath].attrs["qtype"] == qtype:
+                return f[datapath]
+            else:
+                raise ValueError("Not possible to convert hdf5 data between shr and shc.")
         else:
             raise ValueError("qtype = '%s' is not supported (yet)." % qtype)
     elif filename[-3:] == "mat":
