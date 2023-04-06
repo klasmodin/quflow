@@ -62,7 +62,7 @@ def compute_direct_laplacian(N, bc=False):
 
 
 @njit
-def dot_direct_(lap, P, W):
+def dot_direct_skewh_(lap, P, W):
     """
     Dot product for direct matrix.
 
@@ -111,8 +111,78 @@ def dot_direct_(lap, P, W):
             W[n-1+m, n-1] = -np.conj(wk)
 
 
+@njit
+def dot_direct_nonskewh_(lap, P, W):
+    """
+    Dot product for direct matrix for non-skew-Hermitian
+    `P` and `W`.
+
+    Parameters
+    ----------
+    lap: ndarray
+        Direct laplacian.
+    P: ndarray(shape=(N,N), dtype=complex)
+        Input matrix.
+    W: ndarray(shape=(N,N), dtype=complex)
+        Output matrix.
+    """
+    N = P.shape[0]
+
+    for m in range(-N+1, N):
+        absm = abs(m)
+        n = N-absm
+        start_ind = lap.shape[1]-n*(n+1)//2
+        end_ind = start_ind + n
+        a = lap[0, start_ind:end_ind]
+        b = lap[1, start_ind:end_ind]
+
+        # k = 0
+        if m < 0:
+            pk = P[absm, 0]
+        else:
+            pk = P[0, absm]
+        pk_plus = P[1, absm+1]
+        wk = b[0]*pk + a[1]*pk_plus
+        if m < 0:
+            W[absm, 0] = wk
+        else:
+            W[0, absm] = wk
+
+        # k = 1,...,n-2
+        for k in range(1, n-1):
+            if m < 0:
+                pk_minus = P[absm+k-1, k-1]
+                pk = P[absm+k, k]
+                pk_plus = P[absm+k+1, k+1]
+            else:
+                pk_minus = P[k-1, absm+k-1]
+                pk = P[k, absm+k]
+                pk_plus = P[k+1, absm+k+1]
+            wk = a[k]*pk_minus + b[k]*pk + a[k+1]*pk_plus
+            if m < 0:
+                W[absm+k, k] = wk
+            else:
+                W[k, absm+k] = wk
+
+        # k = n-1
+        if m < 0:
+            pk_minus = P[absm+n-2, n-2]
+            pk = P[absm+n-1, n-1]
+            wk = a[n-1]*pk_minus + b[n-1]*pk
+            W[absm+n-1, n-1] = wk
+        else:
+            pk_minus = P[n-2, absm+n-2]
+            pk = P[n-1, absm+n-1]
+            wk = a[n-1]*pk_minus + b[n-1]*pk
+            W[n-1, absm+n-1] = wk
+
+
+# Default choice
+dot_direct_ = dot_direct_skewh_
+
+
 @njit(parallel=True)
-def solve_direct_(lap, W, P, vtmp, ytmp):
+def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
     """
     Highly optimized function for solving the quantized
     Poisson equation (or more generally the equation defined by
@@ -170,6 +240,80 @@ def solve_direct_(lap, W, P, vtmp, ytmp):
     trP = np.trace(P)/N
     for k in prange(N):
         P[k, k] -= trP
+
+
+@njit(parallel=True)
+def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
+    """
+    Highly optimized function for solving the quantized
+    Poisson equation for non-skew-Hermitian `W` and `P`
+    (or more generally the equation defined by the `lap` direct matrix).
+
+    Parameters
+    ----------
+    lap: ndarray(shape=(2, N*(N+1)/2), dtype=float)
+        Direct laplacian.
+    W: ndarray(shape=(N, N), dtype=complex)
+        Input matrix.
+    P: ndarray(shape=(N, N), dtype=complex)
+        Output matrix.
+    vtmp: ndarray(shape=(N*(N+1)/2,), dtype=float)
+        Temporary float memory needed.
+    ytmp: ndarray(shape=(N*(N+1)/2,), dtype=complex)
+        Temporary complex memory needed.
+    """
+    N = W.shape[0]
+
+    for m in prange(-N+1, N):
+        absm = abs(m)
+        n = N-absm
+        start_ind = lap.shape[1]-n*(n+1)//2
+        end_ind = start_ind + n
+        a = lap[0, start_ind:end_ind]
+        b = lap[1, start_ind:end_ind]
+        y = ytmp[start_ind:end_ind]
+        v = vtmp[start_ind:end_ind]
+
+        vk = b[0]
+        v[0] = vk
+        if m < 0:
+            fk = W[absm, 0]
+        else:
+            fk = W[0, absm]
+        yk = fk
+        y[0] = yk
+
+        for k in range(1, n):
+            lk = a[k]/vk
+            if m < 0:
+                fk = W[absm+k, k]
+            else:
+                fk = W[k, absm+k]
+            yk = fk - lk*yk
+            y[k] = yk
+            vk = b[k] - lk*a[k]
+            v[k] = vk
+
+        pk = y[n-1]/v[n-1]
+        if m < 0:
+            P[absm+n-1, n-1] = pk
+        else:
+            P[n-1, absm+n-1] = pk
+
+        for k in range(n-2, -1, -1):
+            pk = (y[k]-a[k+1]*pk)/v[k]
+            if m < 0:
+                P[absm+k, k] = pk
+            else:
+                P[k, absm+k] = pk
+
+    trP = np.trace(P)/N
+    for k in prange(N):
+        P[k, k] -= trP
+
+
+# Default choice of direct solver
+solve_direct_ = solve_direct_skewh_
 
 
 # ----------------------
