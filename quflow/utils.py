@@ -112,14 +112,14 @@ def diagh2mat(dlow):
     return W
 
 
-@njit
+# @njit
 def ind2elm(ind):
     """
     Convert single index in omega vector to (el, m) indices.
 
     Parameters
     ----------
-    ind: int
+    ind: int or array(dtype=int)
 
     Returns
     -------

@@ -139,9 +139,10 @@ def dot_direct_nonskewh_(lap, P, W):
         # k = 0
         if m < 0:
             pk = P[absm, 0]
+            pk_plus = P[absm+1, 1]
         else:
             pk = P[0, absm]
-        pk_plus = P[1, absm+1]
+            pk_plus = P[1, absm+1]
         wk = b[0]*pk + a[1]*pk_plus
         if m < 0:
             W[absm, 0] = wk

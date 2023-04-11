@@ -75,6 +75,102 @@ def test_solve_poisson(N):
     assert np.abs(P_sparse-P_direct).max() < 1e-10
 
 
+@pytest.mark.parametrize("N", [4, 33, 64])
+def test_solve_poisson_nonskewh(N):
+
+    np.random.seed(42) # For reproducability
+    omegaW = np.random.randn(16) + 1.0j*np.random.randn(16)
+    ells = qf.ind2elm(np.arange(16))[0][1:]
+    omegaP = omegaW.copy()
+    omegaP[1:] /= -ells*(ells+1)
+    omegaW[0] = 0.0
+    omegaP[0] = 0.0
+
+    W = qf.shc2mat(omegaW, N=N)
+    Pexact = qf.shc2mat(omegaP, N=N)
+
+    current_solve_direct_ = qf.laplacian.direct.solve_direct_
+
+    qf.laplacian.direct.solve_direct_ = qf.laplacian.direct.solve_direct_nonskewh_
+    P = qf.solve_poisson(W)
+
+    qf.laplacian.direct.solve_direct_ = current_solve_direct_
+
+    np.testing.assert_allclose(P, Pexact)
+
+
+@pytest.mark.parametrize("N", [4, 33, 64])
+def test_solve_poisson_skewh(N):
+
+    np.random.seed(42)  # For reproducability
+    omegaW = np.random.randn(16).copy()
+    ells = qf.ind2elm(np.arange(16))[0][1:]
+    omegaP = omegaW.copy()
+    omegaP[1:] /= -ells*(ells+1)
+    omegaW[0] = 0.0
+    omegaP[0] = 0.0
+
+    W = qf.shr2mat(omegaW, N=N)
+    Pexact = qf.shr2mat(omegaP, N=N)
+
+    current_solve_direct_ = qf.laplacian.direct.solve_direct_
+
+    qf.laplacian.direct.solve_direct_ = qf.laplacian.direct.solve_direct_skewh_
+    P = qf.solve_poisson(W)
+
+    qf.laplacian.direct.solve_direct_ = current_solve_direct_
+
+    np.testing.assert_allclose(P, Pexact)
+
+
+@pytest.mark.parametrize("N", [4, 33, 64])
+def test_laplace_skewh(N):
+
+    np.random.seed(22)  # For reproducability
+    omegaP = np.random.randn(16).copy()
+    ells = qf.ind2elm(np.arange(16))[0][1:]
+    omegaW = omegaP.copy()
+    omegaW[1:] *= -ells*(ells+1)
+    omegaW[0] = 0.0
+    omegaP[0] = 0.0
+
+    Wexact = qf.shr2mat(omegaW, N=N)
+    P = qf.shr2mat(omegaP, N=N)
+
+    current_dot_direct_ = qf.laplacian.direct.dot_direct_
+
+    qf.laplacian.direct.dot_direct_ = qf.laplacian.direct.dot_direct_skewh_
+    W = qf.laplacian.laplace(P)
+
+    qf.laplacian.direct.dot_direct_ = current_dot_direct_
+
+    np.testing.assert_allclose(W, Wexact)
+
+
+@pytest.mark.parametrize("N", [4, 33, 64])
+def test_laplace_nonskewh(N):
+
+    np.random.seed(22)  # For reproducability
+    omegaP = np.random.randn(16) + 1.0j*np.random.randn(16)
+    ells = qf.ind2elm(np.arange(16))[0][1:]
+    omegaW = omegaP.copy()
+    omegaW[1:] *= -ells*(ells+1)
+    omegaW[0] = 0.0
+    omegaP[0] = 0.0
+
+    Wexact = qf.shc2mat(omegaW, N=N)
+    P = qf.shc2mat(omegaP, N=N)
+
+    current_dot_direct_ = qf.laplacian.direct.dot_direct_
+
+    qf.laplacian.direct.dot_direct_ = qf.laplacian.direct.dot_direct_nonskewh_
+    W = qf.laplacian.laplace(P)
+
+    qf.laplacian.direct.dot_direct_ = current_dot_direct_
+
+    np.testing.assert_allclose(W, Wexact)
+
+
 @pytest.mark.parametrize("N", [33, 65, 128, 513])
 def test_solve_poisson_sparse(N):
 
