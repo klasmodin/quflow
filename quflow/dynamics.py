@@ -16,10 +16,25 @@ from numba import njit, prange
 # LOWER LEVEL FUNCTIONS
 # ---------------------
 
-def commutator(W, P):
+def commutator_generic(W, P):
+    """
+    Commutator for arbitrary matrices.
+
+    Parameters
+    ----------
+    W: ndarray
+    P: ndarray
+
+    Returns
+    -------
+    ndarray
+    """
+    return W@P - P@W
+
+
+def commutator_skewherm(W, P):
     """
     Efficient computations of commutator for skew-Hermitian matrices.
-    Warnings: only works for skew-Hermitian.
 
     Parameters
     ----------
@@ -33,6 +48,10 @@ def commutator(W, P):
     VF = W@P
     VF -= VF.conj().T
     return VF
+
+
+# Select default commutator
+commutator = commutator_skewherm
 
 
 @njit(parallel=False)
@@ -276,10 +295,12 @@ def rk4(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
     return W
 
 
-def isomp(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
-          tol=1e-8, maxit=10, verbatim=False, enforce_hermitian=True):
+def isomp_quasinewton(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
+                      tol=1e-8, maxit=10, verbatim=False, enforce_hermitian=True):
     """
-    Time-stepping by isospectral midpoint second order method.
+    Time-stepping by isospectral midpoint second order method using
+    a quasi-Newton iteration scheme. This scheme preserves the eigen spectrum
+    of `W` up to machine epsilon.
 
     Parameters
     ----------
@@ -429,10 +450,11 @@ def isomp_simple(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
     return W
 
 
-def isomp_fixedpoint_skewherm(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
-                              tol=1e-8, maxit=5, verbatim=True, skewherm_proj_freq=3000, forcing=None):
+def isomp_fixedpoint(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson,
+                     tol=1e-8, maxit=5, verbatim=True, skewherm=True, skewherm_proj_freq=500, forcing=None):
     """
-    Time-stepping by isospectral midpoint second order method for skew-Hermitian W.
+    Time-stepping by isospectral midpoint second order method for skew-Hermitian W
+    using fixed-point iterations.
 
     Parameters
     ----------
@@ -450,6 +472,8 @@ def isomp_fixedpoint_skewherm(W, stepsize=0.1, steps=100, hamiltonian=solve_pois
         Maximum number of iterations.
     verbatim: bool
         Print extra information if True. Default is False.
+    skewherm: bool (default: True)
+        Flag if the flow is skew-Hermitian.
     skewherm_proj_freq: int
         Project onto skew-Hermitian every skewherm_proj_freq step.
     forcing: function(P, W) or None (default)
@@ -489,7 +513,10 @@ def isomp_fixedpoint_skewherm(W, stepsize=0.1, steps=100, hamiltonian=solve_pois
             # Compute middle variables
             PWcomm = Phalf @ Whalf
             PWPhalf = PWcomm @ Phalf
-            PWcomm -= PWcomm.conj().T
+            if skewherm:
+                PWcomm -= PWcomm.conj().T
+            else:
+                PWcomm -= Whalf @ Phalf
 
             # Update dW
             np.copyto(dW_old, dW)
@@ -519,7 +546,7 @@ def isomp_fixedpoint_skewherm(W, stepsize=0.1, steps=100, hamiltonian=solve_pois
         W += 2.0*PWcomm
 
         # Check if projection needed
-        if k+1 % skewherm_proj_freq == 0:
+        if skewherm and k+1 % skewherm_proj_freq == 0:
             W /= 2.0
             W -= W.conj().T
 
@@ -529,6 +556,10 @@ def isomp_fixedpoint_skewherm(W, stepsize=0.1, steps=100, hamiltonian=solve_pois
         print("Average number of iterations per step: {:.2f}".format(total_iterations/steps))
 
     return W
+
+
+# Default isomp method
+isomp = isomp_fixedpoint
 
 
 def scale_decomposition(W, P=None, hamiltonian=solve_poisson):
