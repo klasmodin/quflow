@@ -65,6 +65,18 @@ def test_laplace(N):
 
 
 @pytest.mark.parametrize("N", [33, 65, 128, 513])
+def test_laplace_tridiagonal(N):
+
+    P = get_random_mat(N)
+
+    W_tri = qf.laplacian.tridiagonal.laplace(P)
+    W_direct = qudirect.laplace(P)
+
+    np.testing.assert_allclose(W_tri, W_direct)
+    # assert np.abs(W_tri-W_direct).max() < 1e-10
+
+
+@pytest.mark.parametrize("N", [33, 65, 128, 513])
 def test_solve_poisson(N):
 
     W = get_random_mat(N)
@@ -75,10 +87,31 @@ def test_solve_poisson(N):
     assert np.abs(P_sparse-P_direct).max() < 1e-10
 
 
+@pytest.mark.parametrize("N", [33, 65, 128, 513])
+def test_solve_poisson_tridiagonal(N):
+
+    W = get_random_mat(N)
+
+    P_tri = qf.laplacian.tridiagonal.solve_poisson(W)
+    P_direct = qudirect.solve_poisson(W)
+
+    # P_tri -= np.eye(W.shape[0])*np.trace(P_tri)/W.shape[0]
+    # diag_P = qf.mat2diagh(P_tri)
+    # diag_P[0, :] -= diag_P[0, :].sum()/W.shape[0]
+    # P_tri = qf.diagh2mat(diag_P)
+
+    print(np.trace(W))
+    print(qf.mat2diagh(W)[0, :].sum())
+    print(np.trace(P_direct))
+    print(np.trace(P_tri))
+    np.testing.assert_allclose(P_tri, P_direct)
+    # assert np.abs(P_tri-P_direct).max() < 1e-10
+
+
 @pytest.mark.parametrize("N", [4, 33, 64])
 def test_solve_poisson_nonskewh(N):
 
-    np.random.seed(42) # For reproducability
+    np.random.seed(42)  # For reproducability
     omegaW = np.random.randn(16) + 1.0j*np.random.randn(16)
     ells = qf.ind2elm(np.arange(16))[0][1:]
     omegaP = omegaW.copy()
@@ -92,7 +125,7 @@ def test_solve_poisson_nonskewh(N):
     current_solve_direct_ = qf.laplacian.direct.solve_direct_
 
     qf.laplacian.direct.solve_direct_ = qf.laplacian.direct.solve_direct_nonskewh_
-    P = qf.solve_poisson(W)
+    P = qf.laplacian.direct.solve_poisson(W)
 
     qf.laplacian.direct.solve_direct_ = current_solve_direct_
 
@@ -116,7 +149,7 @@ def test_solve_poisson_skewh(N):
     current_solve_direct_ = qf.laplacian.direct.solve_direct_
 
     qf.laplacian.direct.solve_direct_ = qf.laplacian.direct.solve_direct_skewh_
-    P = qf.solve_poisson(W)
+    P = qf.laplacian.direct.solve_poisson(W)
 
     qf.laplacian.direct.solve_direct_ = current_solve_direct_
 
@@ -140,7 +173,7 @@ def test_laplace_skewh(N):
     current_dot_direct_ = qf.laplacian.direct.dot_direct_
 
     qf.laplacian.direct.dot_direct_ = qf.laplacian.direct.dot_direct_skewh_
-    W = qf.laplacian.laplace(P)
+    W = qf.laplacian.direct.laplace(P)
 
     qf.laplacian.direct.dot_direct_ = current_dot_direct_
 
@@ -164,7 +197,7 @@ def test_laplace_nonskewh(N):
     current_dot_direct_ = qf.laplacian.direct.dot_direct_
 
     qf.laplacian.direct.dot_direct_ = qf.laplacian.direct.dot_direct_nonskewh_
-    W = qf.laplacian.laplace(P)
+    W = qf.laplacian.direct.laplace(P)
 
     qf.laplacian.direct.dot_direct_ = current_dot_direct_
 
