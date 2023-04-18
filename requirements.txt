@@ -8,4 +8,5 @@ scipy>=1.6.0
 h5py>=2.10.0
 pyspherical>=0.0.2
 appdirs>=1.4.4
-quflow>=0.0.2
+quflow>=0.0.3
+tqdm

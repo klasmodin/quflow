@@ -26,7 +26,7 @@ setup_args = {
     'test_suite': 'pytest',
     'tests_require': ['pytest', 'matplotlib'],
     'setup_requires': ['pytest-runner'],
-    'install_requires': ['numpy', 'numba', 'scipy', 'pyssht>=1.5.2', 'appdirs'],
+    'install_requires': ['numpy', 'numba', 'scipy', 'pyssht>=1.3.0', 'appdirs', 'tqdm'],
     'classifiers': ['Development Status :: 3 - Alpha',
                     'Intended Audience :: Science/Research',
                     'License :: OSI Approved :: MIT License',
