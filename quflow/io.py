@@ -341,6 +341,7 @@ def save(filename, data, qtime=None, qstepsize=None, N=None, qtype="shr", datapa
         Time step in q-time. Only used if qtime is not specified.
     N: int
     qtype: str
+        Either of 'shr' (default) or 'shc'
     datapath: str
         HDF5-file prefix of the datapath. Default: "".
     attrs: dict
@@ -466,7 +467,7 @@ def save(filename, data, qtime=None, qstepsize=None, N=None, qtype="shr", datapa
             raise ValueError("Format %s is not supported yet." % qtype)
 
 
-def load(filename, datapath="state", qtype="shr"):
+def load(filename, datapath="state", qtype="auto"):
     """
     Load data saved in either MATLAB or HDF5 format.
 
@@ -474,6 +475,7 @@ def load(filename, datapath="state", qtype="shr"):
     ----------
     filename: str
     qtype: str
+        Either of 'auto' (default), 'shr', or 'shc'
 
     Returns
     -------
@@ -483,6 +485,8 @@ def load(filename, datapath="state", qtype="shr"):
         f = h5py.File(filename, "r")
 
         # TODO: This is a slight bug, since we're not checking what
+        if qtype == 'auto':
+            qtype = f[datapath].attrs["qtype"]
         if qtype == "shr" or qtype == "shc":
             if f[datapath].attrs["qtype"] == qtype:
                 return f[datapath]

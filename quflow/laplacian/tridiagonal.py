@@ -1,6 +1,5 @@
 import numpy as np
 from scipy.linalg import solveh_banded
-from ..utils import mat2diagh, diagh2mat
 from numba import njit, prange
 
 # ----------------
@@ -16,6 +15,75 @@ _parallel = True
 # ---------------------
 # LOWER LEVEL FUNCTIONS
 # ---------------------
+
+@njit
+def mat2diagh(W):
+    """
+    Return lower diagonal format for hermitian matrix W.
+
+    Parameters
+    ----------
+    W: ndarray, shape=(N, N)
+
+    Returns
+    -------
+    ndarray, shape=(N//2+1, N)
+    """
+    W = np.ascontiguousarray(W)
+    N = W.shape[0]
+    d = np.zeros((N//2+1, N), dtype=W.dtype)
+    for m in range(N//2+1):
+        # Extract m:th lower diagonal
+        dm = W.ravel()[N*m:(N-m)*(N+1)+N*m:N+1]
+
+        # Extract (N-m):th lower diagonal
+        dNm = W.ravel()[N*(N-m):m*(N+1)+N*(N-m):N+1]
+
+        # Insert in d matrix
+        d[m, :N-m] = dm
+        d[m, N-m:] = dNm
+
+    return d
+
+
+@njit
+def diagh2mat(dlow):
+    """
+    Return hermitian matrix W from lower diagonal format.
+
+    Parameters
+    ----------
+    dlow: ndarray, shape=(N//2+1, N)
+
+    Returns
+    -------
+    ndarray, shape=(N, N)
+    """
+    N = dlow.shape[-1]
+    assert dlow.shape[-2] == N//2+1, "Seems dlow is out of shape!"
+    W = np.zeros((N, N), dtype=dlow.dtype)
+
+    for m in range(N//2+1):
+        # Extract m:th lower diagonal
+        dlm = W.ravel()[N*m:(N-m)*(N+1)+N*m:N+1]
+
+        # Extract (N-m):th lower diagonal
+        dlNm = W.ravel()[N*(N-m):m*(N+1)+N*(N-m):N+1]
+
+        # Extract m:th upper diagonal
+        dum = W.ravel()[m:(N-m)*(N+1)+m:N+1]
+
+        # Extract (N-m):th upper diagonal
+        duNm = W.ravel()[N-m:m*(N+1)+N-m:N+1]
+
+        # Insert in W matrix
+        dum[:] = -dlow[m, :N-m].conj()
+        duNm[:] = -dlow[m, N-m:].conj()
+        dlm[:] = dlow[m, :N-m]
+        dlNm[:] = dlow[m, N-m:]
+
+    return W
+
 
 def compute_tridiagonal_laplacian(N, bc=False):
     """
@@ -130,10 +198,9 @@ def solve_tridiagonal_numba(lap, W):
         for i in range(N-2, -1, -1):
             x[i] = (d[i] - a[i]*x[i+1])/b[i]
 
-    # Make sure we preserve trace of W (corresponds to bc for laplacian)
+    # Make sure the trace of P vanishes (corresponds to bc for laplacian)
     trP = Pdiagh[0, :].sum()/N
-    trW = Wdiagh[0, :].sum()/N
-    Pdiagh[0, :] += trW - trP
+    Pdiagh[0, :] -= trP
 
     # Convert back to matrix
     P = diagh2mat(Pdiagh)

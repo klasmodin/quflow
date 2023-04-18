@@ -2,6 +2,7 @@ import numpy as np
 import pyssht
 import os
 from numba import njit, prange
+from scipy.linalg import expm
 
 
 def poisson_finite_differences(omegafun, psifun):
@@ -41,75 +42,6 @@ def poisson_finite_differences(omegafun, psifun):
     br[-2:, :] = br[-2, :]
 
     return br
-
-
-@njit
-def mat2diagh(W):
-    """
-    Return lower diagonal format for hermitian matrix W.
-
-    Parameters
-    ----------
-    W: ndarray, shape=(N, N)
-
-    Returns
-    -------
-    ndarray, shape=(N//2+1, N)
-    """
-    W = np.ascontiguousarray(W)
-    N = W.shape[0]
-    d = np.zeros((N//2+1, N), dtype=W.dtype)
-    for m in range(N//2+1):
-        # Extract m:th lower diagonal
-        dm = W.ravel()[N*m:(N-m)*(N+1)+N*m:N+1]
-
-        # Extract (N-m):th lower diagonal
-        dNm = W.ravel()[N*(N-m):m*(N+1)+N*(N-m):N+1]
-
-        # Insert in d matrix
-        d[m, :N-m] = dm
-        d[m, N-m:] = dNm
-
-    return d
-
-
-@njit
-def diagh2mat(dlow):
-    """
-    Return hermitian matrix W from lower diagonal format.
-
-    Parameters
-    ----------
-    dlow: ndarray, shape=(N//2+1, N)
-
-    Returns
-    -------
-    ndarray, shape=(N, N)
-    """
-    N = dlow.shape[-1]
-    assert dlow.shape[-2] == N//2+1, "Seems dlow is out of shape!"
-    W = np.zeros((N, N), dtype=dlow.dtype)
-
-    for m in range(N//2+1):
-        # Extract m:th lower diagonal
-        dlm = W.ravel()[N*m:(N-m)*(N+1)+N*m:N+1]
-
-        # Extract (N-m):th lower diagonal
-        dlNm = W.ravel()[N*(N-m):m*(N+1)+N*(N-m):N+1]
-
-        # Extract m:th upper diagonal
-        dum = W.ravel()[m:(N-m)*(N+1)+m:N+1]
-
-        # Extract (N-m):th upper diagonal
-        duNm = W.ravel()[N-m:m*(N+1)+N-m:N+1]
-
-        # Insert in W matrix
-        dum[:] = -dlow[m, :N-m].conj()
-        duNm[:] = -dlow[m, N-m:].conj()
-        dlm[:] = dlow[m, :N-m]
-        dlNm[:] = dlow[m, N-m:]
-
-    return W
 
 
 # @njit
@@ -245,39 +177,9 @@ def rotate(xi, W):
     -------
     W_rotated: ndarray(shape=(N,N), dtype=complex)
     """
-    from scipy.linalg import expm
     N = W.shape[0]
     S1, S2, S3 = so3generators(N)
     R = expm(xi[0]*S1 + xi[1]*S2 + xi[2]*S3)
-    return R@W@R.T.conj()
-
-
-def rotate2(xi, W):
-    """
-    Apply axis-angle (Rodrigues) rotation to vorticity matrix.
-    This directly uses Rodrigues' formula (not the matrix exponential).
-    This is under development and should not be used yet.
-
-    Parameters
-    ----------
-    xi: ndarray(shape=(3,), dtype=float)
-    W: ndarray(shape=(N,N), dtype=complex)
-
-    Returns
-    -------
-    W_rotated: ndarray(shape=(N,N), dtype=complex)
-    """
-    N = W.shape[0]
-    S1, S2, S3 = so3generators(N)
-
-    # Find out angle to rotate
-    theta = np.linalg.norm(xi)
-
-    # Apply Rodrigues' formula (see https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula#Matrix_notation)
-    K = (xi[0]*S1 + xi[1]*S2 + xi[2]*S3)/theta
-    R = np.eye(N) + np.sin(theta)*K + (1-np.cos(theta))*(K@K)
-
-    # Return rotation applied to W
     return R@W@R.T.conj()
 
 
