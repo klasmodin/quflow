@@ -533,7 +533,7 @@ def plot2(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fa
 
 def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_args=None,
                       codec='h264', title='QUFLOW animation',
-                      progress_bar=True, progress_file=None, **kwargs):
+                      progress_bar=True, progress_file=None, data2fun=as_fun, **kwargs):
     """
     Parameters
     ----------
@@ -547,6 +547,7 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
         ffmpeg codec. For accelerated Apple encoder, use 'h264_videotoolbox'
     progress_bar
     progress_file
+    data2fun
     kwargs
         Sent to qf.plot(...)
 
@@ -579,7 +580,7 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
         omega = resample(states[0], N)
     else:
         omega = states[0]
-    f0 = as_fun(omega)
+    f0 = data2fun(omega)
 
     with matplotlib.rc_context({'backend': 'Agg'}):
 
@@ -604,7 +605,7 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
                     omega = resample(states[k], N)
                 else:
                     omega = states[k]
-                fun = as_fun(omega)
+                fun = data2fun(omega)
                 # TODO: insert code here for saving img if state file is writable
                 if hasattr(im, 'set_data'):
                     im.set_data(fun)

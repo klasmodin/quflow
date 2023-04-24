@@ -9,7 +9,7 @@ from .laplacian import select_skewherm as select_skewherm_laplacian
 # ----------------
 
 _SKEW_HERM_ = True  # Is the dynamics skew-Hermitian?
-_SKEW_HERM_PROJ_FREQ_ = 100  # How many steps before skew-Hermitian projection, negative = never
+_SKEW_HERM_PROJ_FREQ_ = -1  # How many steps before skew-Hermitian projection, negative = never
 
 
 # ---------------------
@@ -440,18 +440,14 @@ def isomp_fixedpoint(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forc
         Number of steps to take.
     hamiltonian: function
         The Hamiltonian returning a stream matrix.
+    forcing: function(P, W) or None (default)
+        Extra force function (to allow non-isospectral perturbations).
     tol: float
         Tolerance for iterations.
     maxit: int
         Maximum number of iterations.
     verbatim: bool
         Print extra information if True. Default is False.
-    skewherm: bool (default: True)
-        Flag if the flow is skew-Hermitian.
-    skewherm_proj_freq: int
-        Project onto skew-Hermitian every skewherm_proj_freq step.
-    forcing: function(P, W) or None (default)
-        Extra force function (to allow non-isospectral perturbations).
 
     Returns
     -------

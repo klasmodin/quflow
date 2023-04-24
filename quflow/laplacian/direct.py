@@ -7,6 +7,7 @@ from numba import njit, prange
 
 _direct_laplacian_cache = dict()
 _direct_heat_cache = dict()
+_direct_helmholtz_cache = dict()
 _direct_viscdamp_cache = dict()
 
 
@@ -239,7 +240,7 @@ def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
                 P[m+k, k] = -np.conj(pk)
 
     trP = np.trace(P)/N
-    for k in prange(N):
+    for k in range(N):
         P[k, k] -= trP
 
 
@@ -309,7 +310,7 @@ def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
                 P[k, absm+k] = pk
 
     trP = np.trace(P)/N
-    for k in prange(N):
+    for k in range(N):
         P[k, k] -= trP
 
 
@@ -320,6 +321,28 @@ solve_direct_ = solve_direct_skewh_
 # ----------------------
 # HIGHER LEVEL FUNCTIONS
 # ----------------------
+
+def select_skewherm(flag):
+    """
+    Select whether matrices for Laplacian are skew Hermitian.
+
+    Parameters
+    ----------
+    flag: bool
+
+    Returns
+    -------
+    None
+    """
+    global solve_direct_
+    global dot_direct_
+    if flag:
+        solve_direct_ = solve_direct_skewh_
+        dot_direct_ = dot_direct_skewh_
+    else:
+        solve_direct_ = solve_direct_nonskewh_
+        dot_direct_ = dot_direct_skewh_
+
 
 def laplacian(N, bc=False):
     """
@@ -368,7 +391,9 @@ def laplace(P):
 
 def solve_poisson(W):
     """
-    Return stream matrix `P` for `W`.
+    Solve Poisson equation
+        Δ P = W
+    for the stream matrix `P`.
 
     Parameters
     ----------
@@ -390,12 +415,15 @@ def solve_poisson(W):
 
 def solve_heat(h_times_nu, W0):
     """
-    Solve quantized heat equation using backward Euler method.
+    Solve heat equation
+        W' =  ν Δ W,  W(0) = W0
+    using one step of backward Euler method, i.e.,
+        ( 1 - h ν Δ ) W = W0
 
     Parameters
     ----------
     h_times_nu: float
-        Stepsize (in qtime) times viscosity.
+        Stepsize (in qtime) times viscosity ν.
     W0: ndarray(shape=(N, N), dtype=complex)
 
     Returns
@@ -426,12 +454,48 @@ def solve_heat(h_times_nu, W0):
     return Wh
 
 
+def solve_helmholtz(W, alpha=1.0):
+    """
+    Solve the inhomogeneous Helmholtz equation
+        ( 1 - alpha * Δ ) P = W
+
+    Parameters
+    ----------
+    alpha: float
+    W: ndarray(shape=(N, N), dtype=complex)
+
+    Returns
+    -------
+    Wh: ndarray(shape=(N, N), dtype=complex)
+    """
+    global _direct_helmholtz_cache
+
+    N = W.shape[0]
+
+    if (N, alpha) not in _direct_helmholtz_cache:
+        # Get direct laplacian
+        lap = laplacian(N, bc=False)
+
+        # Get direct operator for backward Euler
+        helmholtz = np.array([[0.], [1.]]) - alpha*lap
+
+        # Store in cache
+        _direct_helmholtz_cache[(N, alpha)] = helmholtz
+    else:
+        helmholtz = _direct_helmholtz_cache[(N, alpha)]
+
+    vtmp = np.zeros(helmholtz.shape[1], dtype=np.float64)
+    ytmp = np.zeros(helmholtz.shape[1], dtype=np.complex128)
+    P = np.zeros_like(W)
+    solve_direct_(helmholtz, W, P, vtmp, ytmp)
+
+    return P
+
+
 def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
     """
     Solve quantized viscosity and damping equation
-
         W' - nu * ∆ W + alpha * W = F
-
     for one time-step using the theta scheme.
 
     Parameters
