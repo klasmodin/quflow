@@ -394,25 +394,32 @@ def isomp_simple(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=
         # Compute matrix A
         A = Id - (stepsize/2.0)*Ptilde
 
-        # Compute LU of A
-        luA, piv = scipy.linalg.lu_factor(A)
+        if _SKEW_HERM_:
+            # Compute LU of A
+            luA, piv = scipy.linalg.lu_factor(A)
 
-        # Solve first equation for B
-        B = scipy.linalg.lu_solve((luA, piv), W)
+            # Solve first equation for X
+            X = scipy.linalg.lu_solve((luA, piv), W)
 
-        # Solve second equation for Wtilde
-        Wtilde_new = scipy.linalg.lu_solve((luA, piv), -B.conj().T)
+            # Solve second equation for Wtilde
+            Wtilde = scipy.linalg.lu_solve((luA, piv), -X.conj().T)
 
-        # Make sure solution is Hermitian (this removes drift in rounding errors)
-        if enforce_hermitian:
-            Wtilde_new /= 2.0
-            Wtilde_new -= Wtilde_new.conj().T
+            # Update W
+            W_new = A.conj().T @ Wtilde @ A
 
-        # Update variables
-        Wtilde = Wtilde_new
+        else:
 
-        # Update W
-        W_new = A.conj().T @ Wtilde @ A
+            # Solve first equation for X
+            X = np.linalg.solve(A, W)
+
+            # Solve second equation for Wtilde
+            Aalt = Id + (stepsize/2.0)*Ptilde
+            Wtilde = np.linalg.solve(Aalt.conj().T, X.conj().T).conj().T
+            # The line above could probably be done faster without conj().T everywhere
+
+            # Update W
+            W_new = Aalt @ Wtilde @ A
+
         np.copyto(W, W_new)
 
         # Make sure solution is Hermitian (this removes drift in rounding errors)

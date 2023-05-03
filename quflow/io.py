@@ -272,7 +272,8 @@ class QuData(object):
 
         # Update cache steps and initiate cache if needed
         if self.cache_size == 1:
-            self.W_cache = W.reshape((1,)+W.shape)
+            self.W_cache = np.array([W])
+            # self.W_cache = W.reshape((1,)+W.shape)  # Might be a bug
             self.qtime_cache = np.array([qtime])
             self.cache_steps = 1
         else:
@@ -372,7 +373,8 @@ def save(filename, data, qtime=None, qstepsize=None, N=None, qtype="shr", datapa
 
             # Process data (convert to shr if needed)
             if not is_seq:
-                data = data.reshape((1,)+data.shape)
+                # data = data.reshape((1,)+data.shape)  # Might be a bug
+                data = np.array([data])
             if data_qtype == "shr" or data_qtype == "shc":
                 omega = data
             else:
