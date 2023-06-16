@@ -414,7 +414,7 @@ def run_script(filename, subname):
         RuntimeError("Not able to run {}.".format(script_file))
 
 
-def retrieve(filename, onlyanim=False):
+def retrieve(filename, onlyanim=False, onlysim=False):
     # Old code:
     # run_script(filename, "download")
 
@@ -426,6 +426,8 @@ def retrieve(filename, onlyanim=False):
         download_files = clusterargs['download_files']
         if onlyanim:
             download_files.pop('filename')
+        if onlysim:
+            download_files.pop('animfile')
 
         # Run rsync
         server = clusterargs['server']
