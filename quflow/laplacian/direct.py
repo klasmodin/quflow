@@ -336,12 +336,16 @@ def select_skewherm(flag):
     """
     global solve_direct_
     global dot_direct_
+    oldflag = False
+    if solve_direct_ is solve_direct_skewh_:
+        oldflag = True
     if flag:
         solve_direct_ = solve_direct_skewh_
         dot_direct_ = dot_direct_skewh_
     else:
         solve_direct_ = solve_direct_nonskewh_
-        dot_direct_ = dot_direct_skewh_
+        dot_direct_ = dot_direct_nonskewh_
+    return oldflag
 
 
 def laplacian(N, bc=False):
@@ -405,8 +409,8 @@ def solve_poisson(W):
     """
     N = W.shape[0]
     lap = laplacian(N, bc=True)
-    vtmp = np.zeros(lap.shape[1], dtype=np.float64)
-    ytmp = np.zeros(lap.shape[1], dtype=np.complex128)
+    vtmp = np.zeros(lap.shape[1], dtype=type(W[0, 0].real))
+    ytmp = np.zeros(lap.shape[1], dtype=W.dtype)
     P = np.zeros_like(W)
     solve_direct_(lap, W, P, vtmp, ytmp)
 

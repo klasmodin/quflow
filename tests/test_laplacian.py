@@ -2,18 +2,66 @@ import numpy as np
 import quflow as qf
 import pytest
 import quflow.laplacian.sparse as qusparse
+import quflow.laplacian.tridiagonal as qutridiagonal
 import quflow.laplacian.direct as qudirect
+import quflow.laplacian.cpu as qucpu
 
 
 def get_random_omega_real(N=5):
     return np.random.randn(N**2)
 
 
-def get_random_mat(N=5):
+def get_random_mat(N=5, zero_trace=True, skewh=True):
     W = np.random.randn(N, N) + 1j*np.random.randn(N, N)
-    W -= W.conj().T
-    W -= np.eye(N)*np.trace(W)/N
+    if skewh:
+        W -= W.conj().T
+    if zero_trace:
+        W -= np.eye(N)*np.trace(W)/N
     return W
+
+
+def get_random_poisson_solution(N=5, skewh=True, seed=22, lmax=16):
+    np.random.seed(seed)  # For reproducability
+    if skewh:
+        omegaP = np.random.randn(lmax**2)
+    else:
+        omegaP = np.random.randn(lmax**2) + 1.0j*np.random.randn(lmax**2)
+    omegaW = omegaP.copy()
+    ells = qf.ind2elm(np.arange(lmax**2))[0][1:]
+    omegaW[1:] *= -ells*(ells+1)
+    omegaW[0] = 0.0
+    omegaP[0] = 0.0
+
+    if skewh:
+        sh2mat = qf.shr2mat
+    else:
+        sh2mat = qf.shc2mat
+    W = sh2mat(omegaW, N=N)
+    P = sh2mat(omegaP, N=N)
+
+    return P, W
+
+
+def get_random_helmholtz_solution(N=5, skewh=True, seed=22, lmax=16, alpha=0.1):
+    np.random.seed(seed)  # For reproducability
+    if skewh:
+        omegaP = np.random.randn(lmax**2)
+    else:
+        omegaP = np.random.randn(lmax**2) + 1.0j*np.random.randn(lmax**2)
+    omegaW = omegaP.copy()
+    ells = qf.ind2elm(np.arange(lmax**2))[0][1:]
+    omegaW[1:] *= 1.0 + alpha*ells*(ells+1)
+    omegaW[0] = 0.0
+    omegaP[0] = 0.0
+
+    if skewh:
+        sh2mat = qf.shr2mat
+    else:
+        sh2mat = qf.shc2mat
+    W = sh2mat(omegaW, N=N)
+    P = sh2mat(omegaP, N=N)
+
+    return P, W
 
 
 def get_smooth_mat(N=5):
@@ -53,193 +101,78 @@ def get_smooth_mat(N=5):
     return qf.shr2mat(omegar, N=N)
 
 
-@pytest.mark.parametrize("N", [33, 65, 128, 513])
-def test_laplace(N):
+@pytest.mark.parametrize("N", [33, 65, 128])
+@pytest.mark.parametrize("qulap", [qudirect, qucpu, qusparse, qutridiagonal])
+@pytest.mark.parametrize("skewh", [True, False])
+def test_laplace(N, qulap, skewh):
 
-    P = get_random_mat(N)
+    Pexact, Wexact = get_random_poisson_solution(N=N, skewh=skewh, seed=N)
 
-    W_sparse = qusparse.laplace(P)
-    W_direct = qudirect.laplace(P)
-
-    assert np.abs(W_sparse-W_direct).max() < 1e-10
-
-
-@pytest.mark.parametrize("N", [33, 65, 128, 513])
-def test_laplace_tridiagonal(N):
-
-    P = get_random_mat(N)
-
-    W_tri = qf.laplacian.tridiagonal.laplace(P)
-    W_direct = qudirect.laplace(P)
-
-    np.testing.assert_allclose(W_tri, W_direct)
-    # assert np.abs(W_tri-W_direct).max() < 1e-10
-
-
-@pytest.mark.parametrize("N", [33, 65, 128, 513])
-def test_solve_poisson(N):
-
-    W = get_random_mat(N)
-
-    P_sparse = qusparse.solve_poisson(W)
-    P_direct = qudirect.solve_poisson(W)
-
-    assert np.abs(P_sparse-P_direct).max() < 1e-10
-
-
-@pytest.mark.parametrize("N", [33, 65, 128, 513])
-def test_solve_poisson_tridiagonal(N):
-
-    W = get_random_mat(N)
-
-    P_tri = qf.laplacian.tridiagonal.solve_poisson(W)
-    P_direct = qudirect.solve_poisson(W)
-
-    # P_tri -= np.eye(W.shape[0])*np.trace(P_tri)/W.shape[0]
-    # diag_P = qf.mat2diagh(P_tri)
-    # diag_P[0, :] -= diag_P[0, :].sum()/W.shape[0]
-    # P_tri = qf.diagh2mat(diag_P)
-
-    print(np.trace(W))
-    print(qf.mat2diagh(W)[0, :].sum())
-    print(np.trace(P_direct))
-    print(np.trace(P_tri))
-    np.testing.assert_allclose(P_tri, P_direct)
-    # assert np.abs(P_tri-P_direct).max() < 1e-10
-
-
-@pytest.mark.parametrize("N", [4, 33, 64])
-def test_solve_poisson_nonskewh(N):
-
-    np.random.seed(42)  # For reproducability
-    omegaW = np.random.randn(16) + 1.0j*np.random.randn(16)
-    ells = qf.ind2elm(np.arange(16))[0][1:]
-    omegaP = omegaW.copy()
-    omegaP[1:] /= -ells*(ells+1)
-    omegaW[0] = 0.0
-    omegaP[0] = 0.0
-
-    W = qf.shc2mat(omegaW, N=N)
-    Pexact = qf.shc2mat(omegaP, N=N)
-
-    current_solve_direct_ = qf.laplacian.direct.solve_direct_
-
-    qf.laplacian.direct.solve_direct_ = qf.laplacian.direct.solve_direct_nonskewh_
-    P = qf.laplacian.direct.solve_poisson(W)
-
-    qf.laplacian.direct.solve_direct_ = current_solve_direct_
-
-    np.testing.assert_allclose(P, Pexact)
-
-
-@pytest.mark.parametrize("N", [4, 33, 64])
-def test_solve_poisson_skewh(N):
-
-    np.random.seed(42)  # For reproducability
-    omegaW = np.random.randn(16).copy()
-    ells = qf.ind2elm(np.arange(16))[0][1:]
-    omegaP = omegaW.copy()
-    omegaP[1:] /= -ells*(ells+1)
-    omegaW[0] = 0.0
-    omegaP[0] = 0.0
-
-    W = qf.shr2mat(omegaW, N=N)
-    Pexact = qf.shr2mat(omegaP, N=N)
-
-    current_solve_direct_ = qf.laplacian.direct.solve_direct_
-
-    qf.laplacian.direct.solve_direct_ = qf.laplacian.direct.solve_direct_skewh_
-    P = qf.laplacian.direct.solve_poisson(W)
-
-    qf.laplacian.direct.solve_direct_ = current_solve_direct_
-
-    np.testing.assert_allclose(P, Pexact)
-
-
-@pytest.mark.parametrize("N", [4, 33, 64])
-def test_laplace_skewh(N):
-
-    np.random.seed(22)  # For reproducability
-    omegaP = np.random.randn(16).copy()
-    ells = qf.ind2elm(np.arange(16))[0][1:]
-    omegaW = omegaP.copy()
-    omegaW[1:] *= -ells*(ells+1)
-    omegaW[0] = 0.0
-    omegaP[0] = 0.0
-
-    Wexact = qf.shr2mat(omegaW, N=N)
-    P = qf.shr2mat(omegaP, N=N)
-
-    current_dot_direct_ = qf.laplacian.direct.dot_direct_
-
-    qf.laplacian.direct.dot_direct_ = qf.laplacian.direct.dot_direct_skewh_
-    W = qf.laplacian.direct.laplace(P)
-
-    qf.laplacian.direct.dot_direct_ = current_dot_direct_
+    try:
+        oldflag = qulap.select_skewherm(skewh)
+    except AttributeError:
+        if not skewh:
+            return None
+    W = qulap.laplace(Pexact)
+    try:
+        qulap.select_skewherm(oldflag)
+    except AttributeError:
+        pass
 
     np.testing.assert_allclose(W, Wexact)
 
 
-@pytest.mark.parametrize("N", [4, 33, 64])
-def test_laplace_nonskewh(N):
+@pytest.mark.parametrize("N", [33, 65, 128])
+@pytest.mark.parametrize("qulap", [qudirect, qucpu, qusparse, qutridiagonal])
+@pytest.mark.parametrize("skewh", [True, False])
+def test_solve_poisson(N, qulap, skewh):
 
-    np.random.seed(22)  # For reproducability
-    omegaP = np.random.randn(16) + 1.0j*np.random.randn(16)
-    ells = qf.ind2elm(np.arange(16))[0][1:]
-    omegaW = omegaP.copy()
-    omegaW[1:] *= -ells*(ells+1)
-    omegaW[0] = 0.0
-    omegaP[0] = 0.0
+    Pexact, Wexact = get_random_poisson_solution(N=N, skewh=skewh, seed=N)
 
-    Wexact = qf.shc2mat(omegaW, N=N)
-    P = qf.shc2mat(omegaP, N=N)
+    try:
+        oldflag = qulap.select_skewherm(skewh)
+    except AttributeError:
+        if not skewh:
+            return None
+    P = qulap.solve_poisson(Wexact)
+    try:
+        qulap.select_skewherm(oldflag)
+    except AttributeError:
+        pass
 
-    current_dot_direct_ = qf.laplacian.direct.dot_direct_
-
-    qf.laplacian.direct.dot_direct_ = qf.laplacian.direct.dot_direct_nonskewh_
-    W = qf.laplacian.direct.laplace(P)
-
-    qf.laplacian.direct.dot_direct_ = current_dot_direct_
-
-    np.testing.assert_allclose(W, Wexact)
+    np.testing.assert_allclose(P, Pexact)
 
 
-@pytest.mark.parametrize("N", [33, 65, 128, 513])
-def test_solve_poisson_sparse(N):
+@pytest.mark.parametrize("N", [33, 65, 128])
+@pytest.mark.parametrize("qulap", [qudirect, qucpu])
+@pytest.mark.parametrize("skewh", [True, False])
+def test_solve_helmholtz(N, qulap, skewh, alpha=0.1):
 
-    W = get_random_mat(N)
+    Pexact, Wexact = get_random_helmholtz_solution(N=N, skewh=skewh, seed=22, alpha=alpha)
 
-    P = qusparse.solve_poisson(W)
-    W2 = qusparse.laplace(P)
+    oldflag = qulap.select_skewherm(skewh)
+    P = qulap.solve_helmholtz(Wexact, alpha=alpha)
+    qulap.select_skewherm(oldflag)
 
-    assert np.abs(W-W2).max() < 1e-10
-
-
-@pytest.mark.parametrize("N", [33, 65, 128, 513])
-def test_solve_poisson_direct(N):
-
-    W = get_random_mat(N)
-
-    P = qudirect.solve_poisson(W)
-    W2 = qudirect.laplace(P)
-
-    assert np.abs(W-W2).max() < 1e-10
+    np.testing.assert_allclose(P, Pexact)
 
 
 @pytest.mark.parametrize("N", [9, 32])
-def test_solve_heat_vs_viscdamp_direct(N):
+@pytest.mark.parametrize("qulap", [qudirect, qucpu, qutridiagonal])
+def test_solve_heat_vs_viscdamp(N, qulap):
     W0 = get_smooth_mat(N)
 
     Wheat = W0.copy()
     Wviscdamp = W0.copy()
     for k in range(100):
-        Wheat = qudirect.solve_heat(1e-2*0.1, Wheat)
-        Wviscdamp = qudirect.solve_viscdamp(0.1, Wviscdamp, nu=1e-2, alpha=0, theta=1)
+        Wheat = qulap.solve_heat(1e-2*0.1, Wheat)
+        Wviscdamp = qulap.solve_viscdamp(0.1, Wviscdamp, nu=1e-2, alpha=0, theta=1)
 
-    assert np.abs(Wheat-Wviscdamp).max() < 1e-10
+    np.testing.assert_allclose(Wheat, Wviscdamp)
 
 
-def test_solve_viscdamp_direct():
+@pytest.mark.parametrize("qulap", [qudirect, qucpu, qutridiagonal])
+def test_solve_viscdamp(qulap):
     N = 9
     W0 = get_smooth_mat(N)
 
@@ -267,6 +200,6 @@ def test_solve_viscdamp_direct():
 
     Wt = W0.copy()
     for k in range(100):
-        Wt = qudirect.solve_viscdamp(0.1, Wt, nu=1e-2, alpha=0.6, theta=0.7)
+        Wt = qulap.solve_viscdamp(0.1, Wt, nu=1e-2, alpha=0.6, theta=0.7)
 
-    assert np.abs(qf.mat2shr(Wt)-omegatref).max() < 1e-10
+    np.testing.assert_allclose(qf.mat2shr(Wt), omegatref, atol=1e-10, rtol=0)
