@@ -75,6 +75,33 @@ def compute_cpu_laplacian_(N, bc=False, dtype=np.float64):
     return lap
 
 
+@njit(parallel=False)
+def dot_cpu_generic_(lap, P, W):
+    N = P.shape[0]
+    for i in prange(N):
+        for j in range(N):
+            W[i, j] = lap[i, j, 0]*P[i, j]
+            if i < N-1 and j < N-1:
+                W[i, j] += lap[i+1, j+1, 1]*P[i+1, j+1]
+            if i > 0 and j > 0:
+                W[i, j] += lap[i, j, 1]*P[i-1, j-1]
+    return W
+
+
+@njit(parallel=False)
+def dot_cpu_skewh2_(lap, P, W):
+    N = P.shape[0]
+    for i in prange(N):
+        for j in range(i):
+            W[i, j] = lap[i, j, 0]*P[i, j]
+            if i < N-1 and j < N-1:
+                W[i, j] += lap[i+1, j+1, 1]*P[i+1, j+1]
+            if i > 0 and j > 0:
+                W[i, j] += lap[i, j, 1]*P[i-1, j-1]
+            W[j, i] = -np.conj(W[i,j])
+    return W
+
+
 @njit(parallel=True)
 def dot_cpu_nonskewh_(lap, P, W):
     """
@@ -146,7 +173,8 @@ def dot_cpu_skewh_(lap, P, W):
 
 
 # Set default dot product
-dot_cpu_ = dot_cpu_skewh_
+# dot_cpu_ = dot_cpu_skewh_
+dot_cpu_ = dot_cpu_generic_
 
 
 @njit(parallel=True)
@@ -303,10 +331,12 @@ def select_skewherm(flag):
 
     if flag:
         solve_cpu_ = solve_cpu_skewh_
-        dot_cpu_ = dot_cpu_skewh_
+        if dot_cpu_ is dot_cpu_nonskewh_:
+            dot_cpu_ = dot_cpu_skewh_
     else:
         solve_cpu_ = solve_cpu_nonskewh_
-        dot_cpu_ = dot_cpu_nonskewh_
+        if dot_cpu_ is dot_cpu_skewh_:
+            dot_cpu_ = dot_cpu_nonskewh_
 
     return oldflag
 
