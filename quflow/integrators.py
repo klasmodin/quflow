@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.linalg
+import inspect
 
 from .laplacian import solve_poisson, solve_heat
 from .laplacian import select_skewherm as select_skewherm_laplacian
@@ -432,7 +433,7 @@ def isomp_simple(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=
 
 
 def isomp_fixedpoint(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None,
-                     tol=1e-8, maxit=5, verbatim=True):
+                     tol=1e-8, maxit=5, verbatim=False):
     """
     Time-stepping by isospectral midpoint second order method for skew-Hermitian W
     using fixed-point iterations.
@@ -520,7 +521,8 @@ def isomp_fixedpoint(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forc
                 print("Max iterations {} reached at step {}.".format(maxit, k))
 
         # Update W
-        W += 2.0*PWcomm
+        PWcomm *= 2
+        W += PWcomm
 
         # Make sure solution is Hermitian (this removes drift in rounding errors)
         if _SKEW_HERM_ and k % _SKEW_HERM_PROJ_FREQ_ == _SKEW_HERM_PROJ_FREQ_ - 1:
@@ -534,5 +536,205 @@ def isomp_fixedpoint(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forc
     return W
 
 
+def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None,
+                      tol='auto', maxit=10, minit=1, 
+                      verbatim=False, compsum=False, reinitialize=True):
+    """
+    Time-stepping by isospectral midpoint second order method for skew-Hermitian W
+    using fixed-point iterations. This implementation uses compensated summation
+    and other tricks to achieve Brouwer's law for reduced accumulative rounding errors.
+
+    Parameters
+    ----------
+    W: ndarray
+        Initial skew-Hermitian vorticity matrix (overwritten and returned).
+    stepsize: float
+        Time step length.
+    steps: int
+        Number of steps to take.
+    hamiltonian: function
+        The Hamiltonian returning a stream matrix.
+    forcing: function(P, W) or None (default)
+        Extra force function (to allow non-isospectral perturbations).
+    tol: float or 'auto'
+        Tolerance for iterations. Negative value or "auto" means automatic choice.
+    maxit: int
+        Maximum number of iterations.
+    integrals: dict or None
+        Dictionary to be filled in with first integrals.
+    stats: dict or None
+        Dictionary to be filled in with integration statistics.
+    verbatim: bool
+        Print extra information if True. Default is False.
+    compsum: bool
+        Use compensated summation.
+    reinitiate: bool
+        Whether to re-initiate the iteration vector at every step.
+
+    Returns
+    -------
+    W: ndarray
+    """
+
+    # Check input
+    assert minit >= 1, "minit must be at least 1."
+    assert maxit >= minit, "maxit must be at minit."
+
+    # Check if Hamiltonian accepts 'out' argument
+    hamiltonian_accepts_out = False
+    if 'out' in inspect.getfullargspec(hamiltonian).args:
+        hamiltonian_accepts_out = True
+        Phalf = np.zeros_like(W)
+
+    # Check if force function accepts 'out' argument
+    force_accepts_out = False
+    if forcing is not None and 'out' in inspect.getfullargspec(forcing).args:
+        force_accepts_out = True
+        FW = np.zeros_like(W)
+
+    # Stats variables
+    total_iterations = 0
+    number_of_maxit = 0
+
+    # Initialize
+    dW = np.zeros_like(W)
+    dW_old = np.zeros_like(W)
+    Whalf = np.zeros_like(W)
+    PWcomm = np.zeros_like(W)
+    PWPhalf = np.zeros_like(W)
+    hhalf = stepsize/2
+
+    # Specify tolerance if needed
+    if tol == "auto" or tol < 0:
+        tol = np.finfo(W.dtype).eps*stepsize*np.linalg.norm(W, np.inf)
+
+    # Variables for compensated summation
+    if compsum:
+        y_compsum = np.zeros_like(W)
+        c_compsum = np.zeros_like(W)
+        t_compsum = np.zeros_like(W)
+        delta_compsum = np.zeros_like(W)
+
+    # --- Beginning of step loop ---
+    for k in range(steps):
+
+        # Per step updates
+        resnorm = np.inf
+        if reinitialize:
+            dW.fill(0.0)
+
+        # --- Beginning of iterations ---
+        for i in range(maxit):
+
+            # Update iterations
+            total_iterations += 1
+
+            # Compute Wtilde
+            np.copyto(Whalf, W)
+            Whalf += dW
+
+            # Update Ptilde
+            if hamiltonian_accepts_out:
+                hamiltonian(Whalf, out=Phalf)
+            else:
+                Phalf = hamiltonian(Whalf)
+            Phalf *= hhalf
+
+            # Compute middle variables
+            # PWcomm = Phalf @ Whalf  # old
+            np.matmul(Phalf, Whalf, out=PWcomm)
+            # PWPhalf = PWcomm @ Phalf  # old
+            np.matmul(PWcomm, Phalf, out=PWPhalf)
+            if _SKEW_HERM_:
+                PWcomm -= PWcomm.conj().T
+            else:
+                PWcomm -= Whalf @ Phalf
+
+            # Update dW
+            np.copyto(dW_old, dW)
+            np.copyto(dW, PWcomm)
+            dW += PWPhalf
+
+            # Add forcing if needed
+            if forcing:
+                # Compute forcing if needed
+                if force_accepts_out:
+                    forcing(Phalf/hhalf, Whalf, out=FW)
+                else:
+                    FW = forcing(Phalf/hhalf, Whalf)
+                FW *= hhalf
+                dW += FW
+
+            # Compute error
+            resnorm_old = resnorm
+            resnorm = scipy.linalg.norm(dW - dW_old, ord=np.inf)
+
+            # Check error
+            if i+1 >= minit and (resnorm <= tol or resnorm >= resnorm_old):
+                break
+
+        else:
+            # We used maxit iterations
+            number_of_maxit += 1
+            if verbatim:
+                print("Max iterations {} reached at step {}.".format(maxit, k))
+            # if stats:
+            #     stats['maxit_reached'] = True
+
+        # Update W
+        PWcomm *= 2
+
+        if compsum:
+            # Compensated summation for W += PWcomm
+
+            # FROM WIKIPEDIA https://en.wikipedia.org/wiki/Kahan_summation_algorithm
+            #
+            # var sum = 0.0                    // Prepare the accumulator.
+            # var c = 0.0                      // A running compensation for lost low-order bits.
+            #
+            # for i = 1 to input.length do     // The array input has elements indexed input[1] to input[input.length].
+            #     var y = input[i] - c         // 1. c is zero the first time around.
+            #     var t = sum + y              // 2. Alas, sum is big, y small, so low-order digits of y are lost.
+            #     c = (t - sum) - y            // 3. (t - sum) cancels the high-order part of y; subtracting y recovers negative (low part of y)
+            #     sum = t                      // 4. Algebraically, c should always be zero. Beware overly-aggressive optimizing compilers!
+            # next i                           // Next time around, the lost low part will be added to y in a fresh attempt.
+            
+            # 1.
+            # y_compsum = PWcomm - c_compsum  # old
+            np.copyto(y_compsum, PWcomm)
+            y_compsum -= c_compsum
+
+            # 2.
+            # t_compsum = W + y_compsum  # old
+            np.copyto(t_compsum, W)
+            t_compsum += y_compsum
+
+            # 3.
+            # c_compsum = (t_compsum - W) - y_compsum  # old
+            np.copyto(delta_compsum, t_compsum)
+            delta_compsum -= W
+            np.copyto(c_compsum, delta_compsum)
+            c_compsum -= y_compsum
+
+            # 4.
+            np.copyto(W, t_compsum)
+        else:
+            W += PWcomm
+
+        # --- End of step ---
+
+    if verbatim:
+        print("Average number of iterations per step: {:.2f}".format(total_iterations/steps))
+    # if stats:
+    #     stats["iteration_average"] = total_iterations/steps
+    #     stats["stepsize"] = stepsize
+    # if integrals:
+    #     P = hamiltonian(W)
+    #     integrals["energy"] = (P*W).sum()
+    #     integrals["enstrophy"] = -(W**2).sum()
+
+    return W
+
+
 # Default isospectral method
-isomp = isomp_fixedpoint
+isomp = isomp_fixedpoint2

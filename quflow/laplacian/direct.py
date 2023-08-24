@@ -244,7 +244,7 @@ def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
         P[k, k] -= trP
 
 
-@njit(parallel=True)
+@njit(parallel=False)
 def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
     """
     Highly optimized function for solving the quantized

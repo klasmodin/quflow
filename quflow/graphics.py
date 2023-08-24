@@ -572,6 +572,12 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
     elif preset == "high":
         if '-preset' not in extra_args and codec == 'h264':
             extra_args += ['-preset', 'veryslow']
+    elif preset == "twopass":
+        if '-b:v' not in extra_args:
+            extra_args += ['-b:v', '3000K']
+        if '-preset' not in extra_args and codec == 'h264':
+            extra_args += ['-preset', 'veryslow']
+
 
     # Create ffmpeg writer
     writer = FFMpegWriter(fps=fps, metadata=metadata, codec=codec, extra_args=extra_args)

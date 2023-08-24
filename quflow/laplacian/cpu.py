@@ -388,7 +388,7 @@ def laplace(P):
     W: ndarray(shape=(N, N), dtype=complex)
     """
     N = P.shape[0]
-    lap = laplacian(N, dtype=type(P[0,0].real))
+    lap = laplacian(N, dtype=type(P[0, 0].real))
 
     # Apply dot product
     W = np.zeros_like(P)
@@ -414,10 +414,6 @@ def solve_poisson(W):
 
     if N not in _cpu_buffer_cache or W.dtype != _cpu_buffer_cache[N]['complex'].dtype:
         allocate_buffer(W)
-        # buffer_complex = W.copy()
-        # buffer_float = W.real.copy()
-        # P_out = W.copy()
-        # _cpu_buffer_cache[N] = {'complex': buffer_complex, 'float': buffer_float, 'P': P_out}
 
     P = _cpu_buffer_cache[N]['P']
     solve_cpu_(lap, W, P,

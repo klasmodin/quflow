@@ -179,7 +179,7 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
     if time is not None:
         qtime = seconds2qtime(time, N)
     if steps is None:
-        steps = round(qtime/qstepsize)
+        steps = round(qtime/np.abs(qstepsize))
     if callback is not None and not isinstance(callback, tuple):
         callback = (callback,)
 
@@ -188,9 +188,9 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
         inner_steps = 100  # Default value of inner_steps
     elif inner_steps is None:
         if inner_qtime is not None:
-            inner_steps = round(inner_qtime/qstepsize)
+            inner_steps = round(inner_qtime/np.abs(qstepsize))
         elif inner_time is not None:
-            inner_steps = round(seconds2qtime(inner_time, N)/qstepsize)
+            inner_steps = round(seconds2qtime(inner_time, N)/np.abs(qstepsize))
 
     # Check if inner_steps is too large
     if inner_steps > steps:
@@ -207,15 +207,15 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
 
     # Create progressbar
     if progress_bar:
-            try:
-                if progress_file is None:
-                    from tqdm.auto import tqdm
-                    pbar = tqdm(total=steps, unit=' steps')
-                else:
-                    from tqdm import tqdm
-                    pbar = tqdm(total=steps, unit=' steps', file=progress_file, ascii=True, mininterval=10.0)
-            except ModuleNotFoundError:
-                progress_bar = False
+        try:
+            if progress_file is None:
+                from tqdm.auto import tqdm
+                pbar = tqdm(total=steps, unit=' steps')
+            else:
+                from tqdm import tqdm
+                pbar = tqdm(total=steps, unit=' steps', file=progress_file, ascii=True, mininterval=10.0)
+        except ModuleNotFoundError:
+            progress_bar = False
 
     # Main simulation loop
     for k in range(0, steps, inner_steps):
@@ -224,7 +224,7 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
         else:
             no_steps = inner_steps
         method(W, qstepsize, steps=no_steps, **method_kwargs)
-        qt += no_steps*qstepsize
+        qt += no_steps*np.abs(qstepsize)
         if progress_bar:
             pbar.update(no_steps)
         if callback is not None:

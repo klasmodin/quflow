@@ -7,6 +7,7 @@ from .integrators import *
 from .io import *
 from . import laplacian
 from . import analysis
+from .analysis import scale_decomposition
 from . import integrators
 
-__version__ = '0.0.4'
+__version__ = '0.0.5'
