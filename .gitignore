@@ -8,3 +8,4 @@ quflow.egg-info
 /quflow/quflow.code-workspace
 /notebooks/*
 !/notebooks/basic-example.ipynb
+*cpython*.pyc
