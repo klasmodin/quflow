@@ -4,3 +4,7 @@ pyspherical
 quflow/__pycache__
 .eggs
 quflow.egg-info
+/simulations/
+/quflow/quflow.code-workspace
+/notebooks/*
+!/notebooks/basic-example.ipynb
