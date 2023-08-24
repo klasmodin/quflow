@@ -9,3 +9,4 @@ quflow.egg-info
 !/notebooks/basic-example.ipynb
 *cpython*.pyc
 quflow.code-workspace
+/.pytest_cache
