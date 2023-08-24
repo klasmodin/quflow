@@ -20,8 +20,10 @@ def get_random_mat(N=5, zero_trace=True, skewh=True):
     return W
 
 
-def get_random_poisson_solution(N=5, skewh=True, seed=22, lmax=16):
-    np.random.seed(seed)  # For reproducability
+def get_random_poisson_solution(N=5, skewh=True, seed=None, lmax=16):
+    if seed is not None:
+        np.random.seed(seed)  # For reproducability
+    lmax = min(lmax, N)
     if skewh:
         omegaP = np.random.randn(lmax**2)
     else:
@@ -122,12 +124,12 @@ def test_laplace(N, qulap, skewh):
     np.testing.assert_allclose(W, Wexact)
 
 
-@pytest.mark.parametrize("N", [33, 65, 128])
+@pytest.mark.parametrize("N", [33, 64, 128])
 @pytest.mark.parametrize("qulap", [qudirect, qucpu, qusparse, qutridiagonal])
 @pytest.mark.parametrize("skewh", [True, False])
 def test_solve_poisson(N, qulap, skewh):
 
-    Pexact, Wexact = get_random_poisson_solution(N=N, skewh=skewh, seed=N)
+    Pexact, Wexact = get_random_poisson_solution(N=N, skewh=skewh, seed=None)
 
     try:
         oldflag = qulap.select_skewherm(skewh)

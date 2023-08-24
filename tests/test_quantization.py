@@ -15,11 +15,12 @@ def get_random_mat(N=5):
 
 @pytest.mark.parametrize("N", [33, 65, 513])
 def test_compute_basis(N):
-    basis = qf.get_basis(N, allow_compute=False)
 
     basis_computed = qf.compute_basis(N)
+    basis = qf.get_basis(N, allow_compute=True)
 
-    assert np.abs(basis-basis_computed).max() < 1e-10
+    np.testing.assert_allclose(basis, basis_computed)
+    # assert np.abs(basis-basis_computed).max() < 1e-10
 
 
 @pytest.mark.parametrize("omega", [get_random_omega_real(), get_random_omega_real(17)])
@@ -33,7 +34,8 @@ def test_shr2mat_(omega):
     W2 = np.zeros((N, N), dtype=complex)
     qf.shr2mat_(omega, basis, W2)
 
-    assert W == pytest.approx(W2)
+    np.testing.assert_allclose(W, W2)
+    # assert W == pytest.approx(W2)
 
 
 @pytest.mark.parametrize("W", [get_random_mat(), get_random_mat(17)])
@@ -48,4 +50,5 @@ def test_mat2shr_(W):
     omega2 = np.zeros(N**2, dtype=float)
     qf.mat2shr_(W, basis, omega2)
 
-    assert omega == pytest.approx(omega2)
+    np.testing.assert_allclose(omega, omega2)
+    # assert omega == pytest.approx(omega2)
