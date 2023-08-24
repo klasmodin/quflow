@@ -6,9 +6,10 @@
 #SBATCH -N 1 # Use maximum 1 node
 #SBATCH -C SKYLAKE # Use SKYLAKE (slower) or ICELAKE (faster)
 
-# module load GCCcore/11.3.0
+# module load GCCcore/11.3.0 
 module load FFmpeg
-module load GEOS
+# module load FFmpeg/4.4.2-GCCcore-11.3.0
+# module load GEOS/3.10.3-GCC-11.3.0
 module load Anaconda3
 
 python ./$RUNFILE > $SIMNAME_results.out
