@@ -42,6 +42,19 @@ The module may be installed directly from the repository:
 > pip install .
 ```
 
+Alternatively, it can be installed via the included `conda` environment 
+description file `quflow-env.yaml`. A new conda environment named `quflow` 
+can be installed via
+```
+> conda env create -f quflow-env.yaml
+```
+If you're running a Mac with the Apple Silicon hardware, 
+you might want to run the following command after:
+```
+> conda install "libblas=*=*accelerate"
+```
+On the M1 Pro hardware, it gives `quflow` a speedup of about a factor 5. 
+
 ## Quick Start
 
 Tests can be run using `pytest` to confirm that the installation was successful.
