@@ -2,6 +2,7 @@ import io
 import re
 
 from setuptools import setup
+from setuptools import find_packages
 
 with io.open('README.md', 'r', encoding='utf-8') as readme_file:
     readme = readme_file.read()
@@ -20,7 +21,7 @@ setup_args = {
     'long_description': readme,
     'long_description_content_type': 'text/markdown',
     'package_dir': {'quflow': 'quflow'},
-    'packages': ['quflow', ],
+    'packages': find_packages(),
     'version': __version__,
     'include_package_data': True,
     'test_suite': 'pytest',

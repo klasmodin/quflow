@@ -18,4 +18,4 @@ dependencies:
   - tqdm
   - pip:
     - pyssht
-    - quflow
+    - git+https://github.com/klasmodin/quflow.git
