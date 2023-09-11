@@ -7,6 +7,12 @@ from mpl_toolkits.axes_grid1 import ImageGrid
 import matplotlib.animation as anim
 from matplotlib.colors import hsv_to_rgb
 
+try:
+    import cartopy.crs as ccrs
+    _has_cartopy = True
+except ModuleNotFoundError:
+    _has_cartopy = False
+
 
 def in_notebook():
     try:
@@ -107,7 +113,7 @@ def create_animation(filename, states, fps=25, preset='medium', extra_args=[], c
     f0 = as_fun(omega)
     figsize = (f0.shape[1]/float(dpi), f0.shape[0]/float(dpi))
 
-    with matplotlib.rc_context({'backend':'Agg'}):
+    with matplotlib.rc_context({'backend': 'Agg'}):
         fig = plt.figure(figsize=figsize)
         ax = fig.add_axes([0, 0, 1, 1])
 
@@ -422,8 +428,6 @@ def plot2(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fa
     -------
         Object returned by `ax.pcolormesh(...)`.
     """
-
-    import cartopy.crs as ccrs
     use_cartopy = False
 
     # Convert and resample data if needed.
@@ -446,19 +450,20 @@ def plot2(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fa
 
         # Check projection type
         square_fig = False
-        if projection == "orthographic":
-            projection = ccrs.Orthographic(central_latitude=central_latitude,
-                                           central_longitude=central_longitude)
-            wpixels = hpixels
-            square_fig = True
-        elif projection == "perspective":
-            projection = ccrs.NearsidePerspective(central_latitude=central_latitude,
-                                                  central_longitude=central_longitude)
-            wpixels = hpixels
-            square_fig = True
-        if isinstance(projection, ccrs.CRS):
-            # Cartopy object
-            use_cartopy = True
+        if _has_cartopy:
+            if projection == "orthographic":
+                projection = ccrs.Orthographic(central_latitude=central_latitude,
+                                               central_longitude=central_longitude)
+                wpixels = hpixels
+                square_fig = True
+            elif projection == "perspective":
+                projection = ccrs.NearsidePerspective(central_latitude=central_latitude,
+                                                      central_longitude=central_longitude)
+                wpixels = hpixels
+                square_fig = True
+            if isinstance(projection, ccrs.CRS):
+                # Cartopy object
+                use_cartopy = True
 
         if dpi is None:
             default_title_height_pixels = round(25)
