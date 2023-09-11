@@ -581,10 +581,10 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
     assert maxit >= minit, "maxit must be at minit."
 
     # Check if Hamiltonian accepts 'out' argument
-    hamiltonian_accepts_out = False
-    if 'out' in inspect.getfullargspec(hamiltonian).args:
-        hamiltonian_accepts_out = True
-        Phalf = np.zeros_like(W)
+    # hamiltonian_accepts_out = False
+    # if 'out' in inspect.getfullargspec(hamiltonian).args:
+    #     hamiltonian_accepts_out = True
+    #     Phalf = np.zeros_like(W)
 
     # Check if force function accepts 'out' argument
     force_accepts_out = False
@@ -634,10 +634,10 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
             Whalf += dW
 
             # Update Ptilde
-            if hamiltonian_accepts_out:
-                hamiltonian(Whalf, out=Phalf)
-            else:
-                Phalf = hamiltonian(Whalf)
+            # if hamiltonian_accepts_out:
+            #     hamiltonian(Whalf, out=Phalf)
+            # else:
+            Phalf = hamiltonian(Whalf)
             Phalf *= hhalf
 
             # Compute middle variables

@@ -259,12 +259,13 @@ class QuData(object):
         for key in attrs:
             setattr(self, key, attrs[key])
 
-    def __call__(self, W, qtime=0.0, **kwargs):
+    def __call__(self, W, inner_time, inner_steps=None, **kwargs):
 
         # Update total steps
         self.total_steps += 1
 
         # Update qtime
+        qtime = inner_time
         if qtime + self.qtime_start < self.qtime_last:  # Hack to fix that time is always increasing. TODO: Fix this!
             self.qtime_start = self.qtime_last
             self.last_write_time = time.time()  # Reset this counter

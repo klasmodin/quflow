@@ -29,7 +29,7 @@ def project_el_(basis, el, W, W_out, multiplier=1.0):
     W_out: ndarray, shape (N,N)
     multiplier: float
     """
-    N = W.shape[0]
+    N = W.shape[-1]
     basis_break_indices = np.zeros((N+1,), dtype=np.int32)
     basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
@@ -51,7 +51,7 @@ def project_el_(basis, el, W, W_out, multiplier=1.0):
 
 @njit
 def project_lower_diag_(diag_m, m, W, W_out, multiplier=1.0):
-    N = W.shape[0]
+    N = W.shape[-1]
 
     # Project m:th diagonal onto diag_m
     a = 0.0
@@ -66,7 +66,7 @@ def project_lower_diag_(diag_m, m, W, W_out, multiplier=1.0):
 
 @njit
 def project_upper_diag_(diag_m, m, W, W_out, multiplier=1.0):
-    N = W.shape[0]
+    N = W.shape[-1]
 
     # Project m:th diagonal onto diag_m
     a = 0.0
@@ -108,7 +108,7 @@ def project_el(W, el=1, complement=False):
         multiplier = 1.0
         W_out = np.zeros_like(W)
 
-    N = W.shape[0]
+    N = W.shape[-1]
     basis = get_basis(N)
 
     if np.isscalar(el):
@@ -127,9 +127,10 @@ def project_el(W, el=1, complement=False):
 # GENERIC SOLVE FUNCTION
 # ----------------------
 
-def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
+def solve(W, stepsize=0.1, steps=None, time=None,
+          inner_steps=None, inner_time=None,
           method=isomp, method_kwargs=None,
-          callback=None, inner_steps=None, inner_qtime=None, inner_time=None,
+          callback=None, callback_kwargs=None,
           progress_bar=True, progress_file=None, **kwargs):
     """
     High-level solve function.
@@ -138,59 +139,60 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
     ----------
     W: ndarray(shape=(N, N), dtype=complex)
         Initial vorticity matrix.
-    qstepsize: float
+    stepsize: float
         Time step length in qtime units.
     steps: None or int
         Total number of steps to take.
-    qtime: None or float
-        Total simulation time in qtime.
     time: None or float
         Total simulation time in seconds.
-    method: callable(W, qstepsize, steps, **method_kwargs)
+        Not used when `steps` is specified.
+    inner_steps: None or int
+        Number of steps taken between each callback.
+    inner_time: None or float
+        Approximate time in seconds between each callback.
+        Not used when `inner_steps` is specified.
+    method: callable(W, stepsize, steps, **kwargs)
         Integration method to carry out the steps.
     method_kwargs: dict
         Extra keyword arguments to send to method at each step.
-    callback: callable(W, qtime, **kwargs)
+        Now deprecated since **kwargs are also passed to the method.
+    callback: callable(W, inner_steps, inner_time, **callback_kwargs)
         The callback function evaluated every outer step.
         It uses **kwargs as extra keyword arguments.
         It is not evaluated at the initial time.
-    inner_steps: None or int
-        Number of steps taken between each callback.
-    inner_qtime: None or float
-        Approximate qtime between each callback.
-    inner_time: None or float
-        Approximate time in seconds between each callback.
+    callback_kwargs: dict
+        Extra keyword arguments to send to callback at each output step.
     progress_bar: bool
         Show progress bar (default: True)
     progress_file: TextIOWrapper or None
         File to write progress to (default: None)
     """
-    N = W.shape[0]
+    N = W.shape[-1]
 
     # Set default hamiltonian if needed
     if method_kwargs is None:
         method_kwargs = {}
+    method_kwargs = {**method_kwargs, **kwargs}
     if 'hamiltonian' not in method_kwargs:
         method_kwargs['hamiltonian'] = solve_poisson
 
     # Determine steps
-    if np.array([0 if x is None else 1 for x in [steps, qtime, time]]).sum() != 1:
-        raise ValueError("One, and only one, of steps, qtime, or time should be specified.")
+    if np.array([0 if x is None else 1 for x in [steps, time]]).sum() != 1:
+        raise ValueError("One, and only one, of steps or time should be specified.")
     if time is not None:
         qtime = seconds2qtime(time, N)
-    if steps is None:
-        steps = round(qtime/np.abs(qstepsize))
+        steps = round(qtime / np.abs(stepsize))
     if callback is not None and not isinstance(callback, tuple):
         callback = (callback,)
+    if callback_kwargs is None:
+        callback_kwargs = dict()
 
     # Determine inner_steps
-    if np.array([0 if x is None else 1 for x in [inner_steps, inner_qtime, inner_time]]).sum() == 0:
+    if np.array([0 if x is None else 1 for x in [inner_steps, inner_time]]).sum() == 0:
         inner_steps = 100  # Default value of inner_steps
     elif inner_steps is None:
-        if inner_qtime is not None:
-            inner_steps = round(inner_qtime/np.abs(qstepsize))
-        elif inner_time is not None:
-            inner_steps = round(seconds2qtime(inner_time, N)/np.abs(qstepsize))
+        if inner_time is not None:
+            inner_steps = round(seconds2qtime(inner_time, N) / np.abs(stepsize))
 
     # Check if inner_steps is too large
     if inner_steps > steps:
@@ -202,8 +204,6 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
     # print('no output steps: ', steps//inner_steps)
     # assert False, "Aborting!"
 
-    # Initiate no steps and simulation q-time
-    qt = 0.0
 
     # Create progressbar
     if progress_bar:
@@ -219,17 +219,18 @@ def solve(W, qstepsize=0.1, steps=None, qtime=None, time=None,
 
     # Main simulation loop
     for k in range(0, steps, inner_steps):
+
         if k+inner_steps > steps:
             no_steps = steps-k
         else:
             no_steps = inner_steps
-        method(W, qstepsize, steps=no_steps, **method_kwargs)
-        qt += no_steps*np.abs(qstepsize)
+        method(W, stepsize, steps=no_steps, **method_kwargs)
+        delta_time = seconds2qtime(no_steps*np.abs(stepsize), N=N)
         if progress_bar:
             pbar.update(no_steps)
         if callback is not None:
             for cfun in callback:
-                cfun(W, qt, **kwargs)
+                cfun(W, inner_time=delta_time, inner_steps=no_steps, **callback_kwargs)
 
     # Close progressbar
     if progress_bar:
