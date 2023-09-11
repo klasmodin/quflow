@@ -26,7 +26,12 @@ Required:
 Optional:
 
 * `matplotlib`
+* `cartopy`
+* `ffmpeg`
 * `pytest`
+* `tqdm`
+* `jupyter`
+* `ipywidgets`
 
 ## Installation
 
@@ -34,8 +39,6 @@ The module may be installed directly from the repository:
 ```
 > git clone https://github.com/kmodin/quflow.git
 > cd quflow
-> python setup.py install
-# or
 > pip install .
 ```
 
@@ -45,9 +48,9 @@ Tests can be run using `pytest` to confirm that the installation was successful.
 
 An example notebook `notebooks/basic-example.ipynb` demonstrates the basic functionality. 
 
-## TODOs
+## Remarks
 
-- If I use HDF5, this is how to [partially copy files with `rsync`](https://fedoramagazine.org/copying-large-files-with-rsync-and-some-misconceptions/).
+- For large HDF5 file, this is how to [partially copy files with `rsync`](https://fedoramagazine.org/copying-large-files-with-rsync-and-some-misconceptions/).
 
 ## References
 

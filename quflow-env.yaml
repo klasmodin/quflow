@@ -12,6 +12,7 @@ dependencies:
   - pytest
   - ffmpeg
   - matplotlib
+  - cartopy
   - jupyter
   - ipywidgets
   - tqdm
