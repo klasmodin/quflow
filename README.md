@@ -53,7 +53,7 @@ you might want to run the following command after:
 ```
 > conda install "libblas=*=*accelerate"
 ```
-On the M1 Pro hardware, it gives `quflow` a speedup of about a factor 5. 
+On the M1 Pro hardware, it gives a speedup of about a factor 5. 
 
 ## Quick Start
 
