@@ -16,7 +16,7 @@ if type module > /dev/null 2>&1
 then
     echo "Loading Anaconda3 module"
     module load Anaconda3
-    export PYTHONPATH=$PYTHONPATH:`pwd`/../quflow
+    export PYTHONPATH=`pwd`/../quflow:$PYTHONPATH
 fi
 
 
