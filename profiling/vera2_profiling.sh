@@ -6,12 +6,12 @@
 #SBATCH -N 1 # Use maximum 1 node
 #SBATCH -C SKYLAKE # Use SKYLAKE (slower) or ICELAKE (faster)
 
-basedir = $(dirname "$0")
+basedir=$(dirname "$0")
 if command -v module &> /dev/null
 then
     module load Anaconda3
-    export PYTHONPATH=$PYTHONPATH:`pwd`/../quflow 
-    basedir = "${HOME}/quflow/profiling"
+    # export PYTHONPATH=$PYTHONPATH:`pwd`/../quflow 
+    basedir="${HOME}/quflow/profiling"
 fi
 
 
