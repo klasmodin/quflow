@@ -6,17 +6,19 @@
 #SBATCH -N 1 # Use maximum 1 node
 #SBATCH -C SKYLAKE # Use SKYLAKE (slower) or ICELAKE (faster)
 
+basedir = $(dirname "$0")
 if command -v module &> /dev/null
 then
     module load Anaconda3
     export PYTHONPATH=$PYTHONPATH:`pwd`/../quflow 
+    basedir = "${HOME}/quflow/profiling"
 fi
 
 
 today=`date '+%Y-%m-%d'`;
 arch=`uname -m`;
-filename="$(dirname "$0")/profile_results_${arch}_${today}.txt"
+filename="${basedir}/profile_results_${arch}_${today}.txt"
 
 echo "Running profiling, output in file ${filename}"
 
-python $(dirname "$0")/run_profiling.py > $filename
+python $basedir/run_profiling.py > $filename
