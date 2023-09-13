@@ -6,25 +6,17 @@
 #SBATCH -N 1 # Use maximum 1 node
 #SBATCH -C SKYLAKE # Use SKYLAKE (slower) or ICELAKE (faster)
 
-# if command -v module &> /dev/null
-# then
-#     module load Anaconda3
-#     export PYTHONPATH=$PYTHONPATH:`pwd`/../quflow ;
-# fi
-
-if type module > /dev/null 2>&1
+if command -v module &> /dev/null
 then
-    echo "Loading Anaconda3 module"
     module load Anaconda3
-    export PYTHONPATH=:`pwd`/../quflow$PYTHONPATH
-    echo $PYTHONPATH
+    export PYTHONPATH=$PYTHONPATH:`pwd`/../quflow 
 fi
 
 
 today=`date '+%Y-%m-%d'`;
 arch=`uname -m`;
-filename="profile_results_${arch}_${today}.txt"
+filename="$(dirname "$0")/profile_results_${arch}_${today}.txt"
 
 echo "Running profiling, output in file ${filename}"
 
-python ./run_profiling.py > $filename
+python $(dirname "$0")/run_profiling.py > $filename
