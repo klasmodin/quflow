@@ -16,6 +16,7 @@ dependencies:
   - jupyter
   - ipywidgets
   - tqdm
+  - prettytable
   - pip:
     - pyssht
     - git+https://github.com/klasmodin/quflow.git

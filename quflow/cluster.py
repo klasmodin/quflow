@@ -12,6 +12,7 @@ import h5py
 _DEFAULT_SERVER_ = "vera2"
 _SERVER_ = _DEFAULT_SERVER_
 _SERVER_PREFIX_ = "simulations"
+_DEFAULT_CPU_ARCH_ = "SKYLAKE"
 # _DEFAULT_SERVER_ = "moklas@vera2.c3se.chalmers.se"
 _RSYNC_COMMAND_ = 'rsync'
 _SSH_COMMAND_ = 'ssh'
@@ -101,7 +102,7 @@ def get_clusterargs(filename):
     return clusterargs
 
 
-def create_script_files(filename, run_template_str, bash_template_str, cores, prerun):
+def create_script_files(filename, run_template_str, bash_template_str, cores, arch, prerun):
     """
 
     Parameters
@@ -110,6 +111,7 @@ def create_script_files(filename, run_template_str, bash_template_str, cores, pr
     run_template_str
     bash_template_str
     cores
+    arch
     prerun
 
     Returns
@@ -134,6 +136,13 @@ def create_script_files(filename, run_template_str, bash_template_str, cores, pr
         .replace('$SIMNAME', get_simname(filename))\
         .replace('$NO_CORES', str(cores))\
         .replace('$RUNFILE', os.path.basename(runfile))
+    if arch == 'CPU':
+        arch = _DEFAULT_CPU_ARCH_
+    if arch is None:
+        bash_str = bash_str.replace('#SBATCH -C $ARCH', '##SBATCH -C $ARCH')
+    else:
+        bash_str = bash_str.replace('$ARCH', arch)
+        
 
     # Write bash file
     submitfile = get_submitfile(filename)
@@ -172,6 +181,7 @@ def solve(filename,
           bash_template=None,
           upload_quflow=True,
           cores='auto',
+          arch='CPU',
           prerun="# No prerun code provided",
           **kwargs):
     """
@@ -186,6 +196,7 @@ def solve(filename,
         If upload=True this will also upload the quflow module (default: True).
     server: str or None
         Address to ssh server where to run script. (default: cluster._DEFAULT_SERVER_)
+        To run locally, specify 'localhost'.
     server_prefix: str
         Remote folder prefix on server.
     submit: bool
@@ -200,6 +211,8 @@ def solve(filename,
         Template for submit script (default: None).
     cores: int or 'auto'
         Number of cores to use (default: 'auto').
+    arch: None or str ('CPU', 'SKYLAKE', 'ICELAKE', 'GPU')
+        Which hardware to use.
     prerun: str
         Code to run in run script prior to simulation.
     kwargs
@@ -262,7 +275,7 @@ def solve(filename,
             bash_template_str = f.read()
 
     # Create run and bash files
-    runfile, submitfile = create_script_files(filename, run_template_str, bash_template_str, cores, prerun)
+    runfile, submitfile = create_script_files(filename, run_template_str, bash_template_str, cores, arch, prerun)
 
     # Print header
     print("########### DONE ###########\n")
@@ -302,11 +315,13 @@ def solve(filename,
         # Run rsync command
         cmd = [_RSYNC_COMMAND_, _RSYNC_UPLOAD_ARGS_]
         cmd += list(upload_files.values()) + [server+":"+remote_folder]
+        if server == "localhost":
+            cmd = cmd.replace("localhost:","")
         print("> " + " ".join(cmd))
         subprocess.run(cmd, check=True, text=True)
 
         # Upload quflow module
-        if upload_quflow:
+        if upload_quflow and server != "localhost":
             cmd = [_RSYNC_COMMAND_, _RSYNC_UPLOAD_ARGS_]
             cmd += ["--exclude", "__pycache__"]
             cmd += ["--exclude", ".DS_Store"]

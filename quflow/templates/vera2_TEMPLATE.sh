@@ -4,12 +4,15 @@
 #SBATCH -J $SIMNAME # name of job
 #SBATCH -n $NO_CORES # number of cores to use
 #SBATCH -N 1 # Use maximum 1 node
-#SBATCH -C SKYLAKE # Use SKYLAKE (slower) or ICELAKE (faster)
+#SBATCH -C $ARCH # Use SKYLAKE (slower) or ICELAKE (faster)
 
-# module load GCCcore/11.3.0 
-module load FFmpeg
-# module load FFmpeg/4.4.2-GCCcore-11.3.0
-# module load GEOS/3.10.3-GCC-11.3.0
-module load Anaconda3
+if command -v module &> /dev/null
+then
+    # module load GCCcore/11.3.0 
+    module load FFmpeg
+    # module load FFmpeg/4.4.2-GCCcore-11.3.0
+    # module load GEOS/3.10.3-GCC-11.3.0
+    module load Anaconda3
+fi
 
 python ./$RUNFILE > $SIMNAME_results.out

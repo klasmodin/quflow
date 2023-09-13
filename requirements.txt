@@ -10,3 +10,4 @@ appdirs>=1.4.4
 quflow>=0.0.3
 tqdm
 cartopy
+prettytable

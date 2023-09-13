@@ -32,6 +32,7 @@ Optional:
 * `tqdm`
 * `jupyter`
 * `ipywidgets`
+* `prettytable`
 
 ## Installation
 
