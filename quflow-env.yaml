@@ -19,4 +19,4 @@ dependencies:
   - prettytable
   - pip:
     - pyssht
-    - git+https://github.com/klasmodin/quflow.git
+    - https://github.com/klasmodin/quflow/archive/master.zip

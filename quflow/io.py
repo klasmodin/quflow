@@ -204,6 +204,66 @@ def determine_qtype(data, N=None):
 
 
 # ----------------------
+# QUDATA2 CLASS DEF
+# ----------------------
+
+class QuData2(object):
+    """
+    An object from here can be used as a callback for the `quflow.solve` function.
+    It represents output data from a simulation, stored on disk as an HDF5 file.
+    The data may be stored in either of the following formats
+    (specified by a string referred to as `qutype`):
+
+    'mat'
+    Vorticity matrix.
+    shape = (;;, N, N)
+    dtype = complex
+
+    'shr'
+    Real spherical harmonics.
+    shape = (;;, N**2)
+    dtype = real
+
+    'shc'
+    Spherical harmonics
+    shape = (;;, N**2)
+    dtype = complex
+
+    'fun'
+    Function values in spherical coordinates
+    shape = (;;, 2*N, N)
+    dtype = real or complex
+
+    Notice that the same object can hold data for several `qutype`.
+    """
+
+    def __init__(self, filename, filemode='a', qtype='shr'):
+        """
+
+
+        Parameters
+        ----------
+        filename
+        filemode
+        qtype
+        """
+        self.filename = filename
+        self.qtype = qtype
+
+    def __call__(self, state, delta_time, delta_steps=None, **kwargs):
+        """
+
+        Parameters
+        ----------
+        state
+        delta_time
+        delta_steps
+        kwargs
+
+        """
+
+
+# ----------------------
 # HIGHER LEVEL FUNCTIONS
 # ----------------------
 

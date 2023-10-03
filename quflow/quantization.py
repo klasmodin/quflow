@@ -116,11 +116,11 @@ def shr2mat_(omega, basis, W_out):
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]
-        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(np.complex128)
+        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(W_out.dtype)
 
         if m == 0:  # Diagonal
             omega_zero_ind = elm2ind(np.arange(0, N), 0)
-            diag = basis_m_mat@omega[omega_zero_ind].astype(np.complex128)
+            diag = basis_m_mat@omega[omega_zero_ind].astype(W_out.dtype)
             assign_lower_diag_(diag, 0, W_out)
         else:
             # Lower diagonal
@@ -147,7 +147,7 @@ def mat2shr_(W, basis, omega_out):
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]
-        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(np.complex128)
+        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(W.dtype)
 
         if m == 0:  # Diagonal
             omega_zero_ind = elm2ind(np.arange(0, N), 0)
@@ -185,7 +185,7 @@ def shc2mat_(omega, basis, W_out):
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]
-        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(np.complex128)
+        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(W_out.dtype)
 
         # Lower diagonal
         omega_m_ind = elm2ind(np.arange(m, N), m)
@@ -211,7 +211,7 @@ def mat2shc_(W, basis, omega_out):
     for m in range(N):
         bind0 = basis_break_indices[m]
         bind1 = basis_break_indices[m+1]
-        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(np.complex128)
+        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(W.dtype)
 
         # Lower diagonal
         omega_m_ind = elm2ind(np.arange(m, N), m)

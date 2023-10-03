@@ -75,10 +75,10 @@ def compute_cpu_laplacian_(N, bc=False, dtype=np.float64):
     return lap
 
 
-@njit(parallel=False)
+@njit(error_model='numpy', fastmath=True)
 def dot_cpu_generic_(lap, P, W):
     N = P.shape[0]
-    for i in prange(N):
+    for i in range(N):
         for j in range(N):
             W[i, j] = lap[i, j, 0]*P[i, j]
             if i < N-1 and j < N-1:
@@ -88,7 +88,7 @@ def dot_cpu_generic_(lap, P, W):
     return W
 
 
-@njit(parallel=False)
+@njit(parallel=False, error_model='numpy', fastmath=True)
 def dot_cpu_skewh2_(lap, P, W):
     N = P.shape[0]
     for i in prange(N):
@@ -102,7 +102,7 @@ def dot_cpu_skewh2_(lap, P, W):
     return W
 
 
-@njit(parallel=True)
+@njit(parallel=True, error_model='numpy', fastmath=True)
 def dot_cpu_nonskewh_(lap, P, W):
     """
     Dot product for tridiagonal operator.
@@ -135,7 +135,7 @@ def dot_cpu_nonskewh_(lap, P, W):
     return W
 
 
-@njit(parallel=False)
+@njit(parallel=False, error_model='numpy', fastmath=True)
 def dot_cpu_skewh_(lap, P, W):
     """
     Dot product for tridiagonal operator, for skew-Hermitian P.
@@ -177,7 +177,7 @@ def dot_cpu_skewh_(lap, P, W):
 dot_cpu_ = dot_cpu_generic_
 
 
-@njit(parallel=True)
+@njit(parallel=True, error_model='numpy', fastmath=True)
 def solve_cpu_nonskewh_(lap, W, P, buffer_float, buffer_complex):
     """
     Function for solving the quantized
@@ -240,7 +240,7 @@ def solve_cpu_nonskewh_(lap, W, P, buffer_float, buffer_complex):
     return P
 
 
-@njit(parallel=True)
+@njit(parallel=True, error_model='numpy', fastmath=True)
 def solve_cpu_skewh_(lap, W, P, buffer_float, buffer_complex):
     """
     Function for solving the quantized
@@ -303,8 +303,99 @@ def solve_cpu_skewh_(lap, W, P, buffer_float, buffer_complex):
     return P
 
 
+@njit(parallel=True)
+def solve_cpu_nonskewh_gpulike_(lap, W, P, buffer_float, buffer_complex):
+    """
+    Function for solving the quantized
+    Poisson equation (or more generally the equation defined by
+    the `lap` array). Uses NUMBA to accelerate the
+    Thomas algorithm for tridiagonal solver calculations.
+
+    Parameters
+    ----------
+    lap: ndarray(shape=(N, N, 2), dtype=float)
+        Tridiagonal laplacian.
+    W: ndarray(shape=(N, N), dtype=complex)
+        Input matrix.
+    P: ndarray(shape=(N, N), dtype=complex)
+        Output matrix.
+    buffer_float: ndarray(shape=(N, N), dtype=float)
+        Float buffer.
+    buffer_complex: ndarray(shape=(N, N), dtype=complex)
+        Complex buffer.
+    """
+    N = W.shape[0]
+
+    lap_flat = lap.reshape((N**2, 2))
+    W_flat = W.ravel()
+    P_flat = P.ravel()
+    buffer_float_flat = buffer_float.ravel()
+    buffer_complex_flat = buffer_complex.ravel()
+
+    # assert lap_flat.flags.c_contiguous
+    # assert W_flat.flags.c_contiguous
+    # assert P_flat.flags.c_contiguous
+
+    # Set array stride. This should be the grid-stride on the GPU.
+    stride = N + 1
+
+    # For each m-diagonal in W, solve a tridiagonal system with Thomas algorithm.
+    # Notice that m=N corresponds to the first lower diagonal. For example, if N=6,
+    # we have the following m-values with respect to the rows and columns of the
+    # original matrix W:
+    #
+    # 0 1 2 3 4 5
+    # 6 0 1 2 3 4
+    # 5 6 0 1 2 3
+    # 4 5 6 0 1 2
+    # 3 4 5 6 0 1
+    # 2 3 4 5 6 0
+    #
+    for m in prange(N+1):
+
+        # Initialize buffers
+        # i, j = mk2ij(m, 0)
+
+        # First element: k = m
+        buffer_float_flat[m] = lap_flat[m, 0]
+        buffer_complex_flat[m] = W_flat[m]
+
+        # Forward sweep according to grid-stride
+        for k in range(m + stride, N**2, stride):
+            # i, j = mk2ij(m, k)
+            # im, jm = i-1, j-1
+
+            w = lap_flat[k, 1]/buffer_float_flat[k-stride]
+            buffer_float_flat[k] = lap_flat[k, 0] - w*lap_flat[k, 1]
+            buffer_complex_flat[k] = W_flat[k] - w*buffer_complex_flat[k-stride]
+            k_last = k
+
+        # Backward sweep according to grid-stride
+        # i, j = mk2ij(m, N-m-1)
+        P_flat[k_last] = buffer_complex_flat[k_last]/buffer_float_flat[k_last]
+        for k in range(k_last - stride, -1, -stride):
+            # i, j = mk2ij(m, k)
+            # ip, jp = i+1, j+1
+            P_flat[k] = (buffer_complex_flat[k] - lap_flat[k+stride, 1]*P_flat[k+stride])/buffer_float_flat[k]
+
+    # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+    # trP = P_flat[::N].sum()
+    # trP /= N
+    # P_flat[::N] -= trP
+
+    trP = P[0, 0]
+    for k in range(1, N):
+        trP += P[k, k]
+    trP /= N
+    for k in range(N):
+        P[k, k] -= trP
+
+    return P
+
+
 # Set default solver
 solve_cpu_ = solve_cpu_skewh_
+# solve_cpu_ = solve_cpu_nonskewh_gpulike_
 
 
 # ----------------------
@@ -318,6 +409,7 @@ def select_skewherm(flag):
     Parameters
     ----------
     flag: bool
+    gpu_like: bool
 
     Returns
     -------
@@ -364,7 +456,7 @@ def laplacian(N, bc=False, dtype=np.float64):
 
     Returns
     -------
-    lap : ndarray(shape=(2, N*(N+1)/2), dtype=flaot)
+    lap : ndarray(shape=(N, N, 2), dtype=float)
     """
     global _cpu_laplacian_cache
 

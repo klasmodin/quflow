@@ -82,7 +82,7 @@ def shc2shr(omega_complex):
     """
     Convert from complex to real spherical harmonics.
     (See https://en.wikipedia.org/wiki/Spherical_harmonics#Real_form)
-    If `omega_complex` does not corresponds to a real function this is a projection.
+    If `omega_complex` does not correspond to a real function this is a projection.
 
     Parameters
     ----------

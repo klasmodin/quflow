@@ -10,15 +10,17 @@ basedir=$(dirname "$0")
 if command -v module &> /dev/null
 then
     module load Anaconda3
-    # export PYTHONPATH=$PYTHONPATH:`pwd`/../quflow 
-    basedir="${HOME}/quflow/profiling"
+    # module load SciPy-bundle/2022.05-intel-2022a
+    # module load LLVM/14.0.3-GCCcore-11.3.0
+    export PYTHONPATH=$PYTHONPATH:${HOME}/quflow 
+    # basedir="${HOME}/quflow/profiling"
 fi
 
 
-today=`date '+%Y-%m-%d'`;
-arch=`uname -m`;
-filename="${basedir}/profile_results_${arch}_${today}.txt"
+# today=`date '+%Y-%m-%d'`;
+# arch=`uname -m`;
+# filename="${basedir}/profile_results_${arch}_${today}.txt"
 
-echo "Running profiling, output in file ${filename}"
+# echo "Running profiling, output in file ${filename}"
 
-python $basedir/run_profiling.py > $filename
+python run_profiling.py "$@"
