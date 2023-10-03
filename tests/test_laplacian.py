@@ -5,6 +5,7 @@ import quflow.laplacian.sparse as qusparse
 import quflow.laplacian.tridiagonal as qutridiagonal
 import quflow.laplacian.direct as qudirect
 import quflow.laplacian.cpu as qucpu
+import quflow.laplacian.gpu as qugpu
 
 
 def get_random_omega_real(N=5):
@@ -104,7 +105,7 @@ def get_smooth_mat(N=5):
 
 
 @pytest.mark.parametrize("N", [33, 65, 128])
-@pytest.mark.parametrize("qulap", [qudirect, qucpu, qusparse, qutridiagonal])
+@pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu, qusparse, qutridiagonal])
 @pytest.mark.parametrize("skewh", [True, False])
 def test_laplace(N, qulap, skewh):
 
@@ -125,7 +126,7 @@ def test_laplace(N, qulap, skewh):
 
 
 @pytest.mark.parametrize("N", [33, 64, 128])
-@pytest.mark.parametrize("qulap", [qudirect, qucpu, qusparse, qutridiagonal])
+@pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu, qusparse, qutridiagonal])
 @pytest.mark.parametrize("skewh", [True, False])
 def test_solve_poisson(N, qulap, skewh):
 
@@ -146,7 +147,7 @@ def test_solve_poisson(N, qulap, skewh):
 
 
 @pytest.mark.parametrize("N", [33, 65, 128])
-@pytest.mark.parametrize("qulap", [qudirect, qucpu])
+@pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu])
 @pytest.mark.parametrize("skewh", [True, False])
 def test_solve_helmholtz(N, qulap, skewh, alpha=0.1):
 
@@ -160,7 +161,7 @@ def test_solve_helmholtz(N, qulap, skewh, alpha=0.1):
 
 
 @pytest.mark.parametrize("N", [9, 32])
-@pytest.mark.parametrize("qulap", [qudirect, qucpu, qutridiagonal])
+@pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu, qutridiagonal])
 def test_solve_heat_vs_viscdamp(N, qulap):
     W0 = get_smooth_mat(N)
 
@@ -173,7 +174,7 @@ def test_solve_heat_vs_viscdamp(N, qulap):
     np.testing.assert_allclose(Wheat, Wviscdamp)
 
 
-@pytest.mark.parametrize("qulap", [qudirect, qucpu, qutridiagonal])
+@pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu, qutridiagonal])
 def test_solve_viscdamp(qulap):
     N = 9
     W0 = get_smooth_mat(N)
