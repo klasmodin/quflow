@@ -255,6 +255,204 @@ def solve_gpu_generic2_(lap, W, P, buffer_float, buffer_complex):
     return P
 
 
+@njit(parallel=True, error_model='numpy', fastmath=True)
+def solve_gpu_generic3_(lap, W, P, buffer_float, buffer_complex):
+    """
+    Function for solving the quantized
+    Poisson equation (or more generally the equation defined by
+    the `lap` array). Uses NUMBA to accelerate the
+    Thomas algorithm for tridiagonal solver calculations.
+
+    Parameters
+    ----------
+    lap: ndarray(shape=(N, N, 2), dtype=float)
+        Tridiagonal laplacian.
+    W: ndarray(shape=(N, N), dtype=complex)
+        Input matrix.
+    P: ndarray(shape=(N, N), dtype=complex)
+        Output matrix.
+    buffer_float: ndarray(shape=(N, N), dtype=float)
+        Float buffer.
+    buffer_complex: ndarray(shape=(N, N), dtype=complex)
+        Complex buffer.
+    """
+    N = W.shape[0]
+
+    lap_flat = lap.reshape((N**2, 2))
+    W_flat = W.ravel()
+    P_flat = P.ravel()
+    buffer_float_flat = buffer_float.ravel()
+    buffer_complex_flat = buffer_complex.ravel()
+
+    lap_rec = lap.ravel()[:2*N**2-2].reshape((N-1, N+1, 2))
+    W_rec = W_flat[:N**2-1].reshape((N-1, N+1))
+    P_rec = P_flat[:N**2-1].reshape((N-1, N+1))
+    buffer_float_rec = buffer_float_flat[:N**2-1].reshape((N-1, N+1))
+    buffer_complex_rec = buffer_complex_flat[:N**2-1].reshape((N-1, N+1))
+
+    # Set array stride. This should be the grid-stride on the GPU.
+    # stride = N + 1
+
+    # For each m-diagonal in W, solve a tridiagonal system with Thomas algorithm.
+    # Notice that m=N corresponds to the first lower diagonal. For example, if N=6,
+    # we have the following m-values with respect to the rows and columns of the
+    # original matrix W:
+    #
+    # 0 1 2 3 4 5
+    # 6 0 1 2 3 4
+    # 5 6 0 1 2 3
+    # 4 5 6 0 1 2
+    # 3 4 5 6 0 1
+    # 2 3 4 5 6 0
+    #
+    # which gets maps to the rectangular (N-1)x(N+1) matrix
+    #
+    # 0 1 2 3 4 5 6
+    # 0 1 2 3 4 5 6
+    # 0 1 2 3 4 5 6
+    # 0 1 2 3 4 5 6
+    # 0 1 2 3 4 5 6
+    # 0
+    #
+    # Notice the extra element 0, which is not in the rectangular matrix
+    # and must therefore be treated individually.
+    #
+    for m in prange(N+1):
+
+        # First forward sweep
+        buffer_float_rec[0, m] = lap_rec[0, m, 0]
+        buffer_complex_rec[0, m] = W_rec[0, m]
+
+        # Forward sweep according to grid-stride
+        for k in range(1, N-1):
+            w = lap_rec[k, m, 1]/buffer_float_rec[k-1, m]
+            buffer_float_rec[k, m] = lap_rec[k, m, 0] - w*lap_rec[k, m, 1]
+            buffer_complex_rec[k, m] = W_rec[k, m] - w*buffer_complex_rec[k-1, m]
+
+        # Set last element
+        if m == 0:
+            # Last forward sweep
+            w = lap_flat[-1, 1]/buffer_float_rec[N-2, m]
+            buffer_float_flat[-1] = lap_flat[-1, 0] - w*lap_flat[-1, 1]
+            buffer_complex_flat[-1] = W_flat[-1] - w*buffer_complex_rec[N-2, m]
+
+            # First backward sweep
+            P_flat[-1] = buffer_complex_flat[-1]/buffer_float_flat[-1]
+            P_rec[-1, m] = (buffer_complex_rec[-1, m] - lap_flat[-1, 1]*P_flat[-1])/buffer_float_rec[-1, m]
+        else:
+            # Backward sweep according to grid-stride
+            P_rec[-1, m] = buffer_complex_rec[-1, m]/buffer_float_rec[-1, m]
+
+        for k in range(N-3, -1, -1):
+            P_rec[k, m] = (buffer_complex_rec[k, m] - lap_rec[k+1, m, 1]*P_rec[k+1, m])/buffer_float_rec[k, m]
+
+    # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+    trP = P_flat[::N+1].sum()
+    trP /= N
+    P_flat[::N+1] -= trP
+
+    return P
+
+
+@njit(parallel=True, error_model='numpy', fastmath=True)
+def solve_gpu_generic4_(lap, W, P, buffer_float, buffer_complex):
+    """
+    Function for solving the quantized
+    Poisson equation (or more generally the equation defined by
+    the `lap` array). Uses NUMBA to accelerate the
+    Thomas algorithm for tridiagonal solver calculations.
+
+    Parameters
+    ----------
+    lap: ndarray(shape=(N, N, 2), dtype=float)
+        Tridiagonal laplacian.
+    W: ndarray(shape=(N, N), dtype=complex)
+        Input matrix.
+    P: ndarray(shape=(N, N), dtype=complex)
+        Output matrix.
+    buffer_float: ndarray(shape=(N, N), dtype=float)
+        Float buffer.
+    buffer_complex: ndarray(shape=(N, N), dtype=complex)
+        Complex buffer.
+    """
+    N = W.shape[0]
+
+    lap_flat = lap.reshape((N**2, 2))
+    W_flat = W.ravel()
+    P_flat = P.ravel()
+    buffer_float_flat = buffer_float.ravel()
+    buffer_complex_flat = buffer_complex.ravel()
+
+    W_rec = W_flat[:N**2-1].reshape((N-1, N+1))
+    P_rec = P_flat[:N**2-1].reshape((N-1, N+1))
+    buffer_float_rec = buffer_float_flat[:N**2-1].reshape((N-1, N+1))
+    buffer_complex_rec = buffer_complex_flat[:N**2-1].reshape((N-1, N+1))
+    lap_rec = lap_flat.ravel()[:2*N**2-2].reshape((N-1, N+1, 2))
+
+    # Set array stride. This should be the grid-stride on the GPU.
+    # stride = N + 1
+
+    # For each m-diagonal in W, solve a tridiagonal system with Thomas algorithm.
+    # Notice that m=N corresponds to the first lower diagonal. For example, if N=6,
+    # we have the following m-values with respect to the rows and columns of the
+    # original matrix W:
+    #
+    # 0 1 2 3 4 5
+    # 6 0 1 2 3 4
+    # 5 6 0 1 2 3
+    # 4 5 6 0 1 2
+    # 3 4 5 6 0 1
+    # 2 3 4 5 6 0
+    #
+    # which gets maps to the rectangular (N-1)x(N+1) matrix
+    #
+    # 0 1 2 3 4 5 6
+    # 0 1 2 3 4 5 6
+    # 0 1 2 3 4 5 6
+    # 0 1 2 3 4 5 6
+    # 0 1 2 3 4 5 6
+    # 0
+    #
+    # Notice the extra element 0, which is not in the rectangular matrix
+    # and must therefore be treated individually.
+    #
+    # for m in prange(N+1):
+
+    # First forward sweep
+    buffer_float_rec[0, :] = lap_rec[0, :, 0]
+    buffer_complex_rec[0, :] = W_rec[0, :]
+
+    # Forward sweep according to grid-stride
+    for k in range(1, N-1):
+        w = lap_rec[k, :, 1]/buffer_float_rec[k-1, :]
+        buffer_float_rec[k, :] = lap_rec[k, :, 0] - w*lap_rec[k, :, 1]
+        buffer_complex_rec[k, :] = W_rec[k, :] - w*buffer_complex_rec[k-1, :]
+
+    # Set last element
+
+    # Last forward sweep
+    w0 = lap_flat[-1, 1]/buffer_float_rec[N-2, 0]
+    buffer_float_flat[-1] = lap_flat[-1, 0] - w0*lap_flat[-1, 1]
+    buffer_complex_flat[-1] = W_flat[-1] - w0*buffer_complex_rec[N-2, 0]
+
+    # First backward sweep
+    P_flat[-1] = buffer_complex_flat[-1]/buffer_float_flat[-1]
+    P_rec[-1, 0] = (buffer_complex_rec[-1, 0] - lap_flat[-1, 1]*P_flat[-1])/buffer_float_rec[-1, 0]
+
+    # Backward sweep according to grid-stride
+    P_rec[-1, 1:] = buffer_complex_rec[-1, 1:]/buffer_float_rec[-1, 1:]
+
+    for k in range(N-3, -1, -1):
+        P_rec[k, :] = (buffer_complex_rec[k, :] - lap_rec[k+1, :, 1]*P_rec[k+1, :])/buffer_float_rec[k, :]
+
+    # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+    trP = P_flat[::N+1].sum()
+    trP /= N
+    P_flat[::N+1] -= trP
+
+    return P
+
+
 # Set default solver
 solve_gpu_ = solve_gpu_generic2_
 

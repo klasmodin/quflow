@@ -143,16 +143,12 @@ filename = args.basename + ".txt"
 fs = io.StringIO()
 with redirect_stdout(fs):
     np.show_config()
+    np.show_runtime()
 with open(filename, 'w') as f:
     with redirect_stdout(f):
         print("\n----------------- System info ------------------")
-        print("Platform: {}".format(platform.platform()))
-        for line in fs.getvalue().split('\n'):
-            if "libraries = " in line:
-                print("BLAS libraries: {}".format(line.split("libraries = ")[-1]))
-            if "library_dirs = " in line:
-                print("BLAS library dirs: {}".format(line.split("library_dirs = ")[-1]))
-                break
+        print("Platform: {}\n".format(platform.platform()))
+        print("Numpy show_config and show_runtime:\n{}".format(fs.getvalue()))
         try:
             import mkl
         except ImportError:
@@ -160,7 +156,7 @@ with open(filename, 'w') as f:
         else:
             print("MKL BLAS: True")
             print("MKL cores (get_max_threads): {}".format(mkl.get_max_threads()))
-        print("dtype: {}".format(dtype))
+        print("\ndtype: {}".format(dtype))
 
         # Run profiling
         for N in N_list:

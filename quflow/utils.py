@@ -143,13 +143,14 @@ def sphgrid(N):
     return theta, phi
 
 
-def so3generators(N):
+def so3generators(N, dtype=np.complex128):
     """
     Return a basis S1, S2, S3 for the representationn of so(3) in u(N).
 
     Parameters
     ----------
     N: int
+    dtype: array type
 
     Returns
     -------
@@ -161,7 +162,7 @@ def so3generators(N):
         1j*np.diag(np.sqrt(s*(s+1)-np.arange(-s, s)*np.arange(-s+1, s+1)), -1)/2
     S2 = np.diag(np.sqrt(s*(s+1)-np.arange(-s, s)*np.arange(-s+1, s+1)), 1)/2 - \
         np.diag(np.sqrt(s*(s+1)-np.arange(-s, s)*np.arange(-s+1, s+1)), -1)/2
-    return S1, S2.astype(np.complex128), S3
+    return S1.astype(dtype), S2.astype(dtype), S3.astype(dtype)
 
 
 def rotate(xi, W):
@@ -178,7 +179,7 @@ def rotate(xi, W):
     W_rotated: ndarray(shape=(N,N), dtype=complex)
     """
     N = W.shape[0]
-    S1, S2, S3 = so3generators(N)
+    S1, S2, S3 = so3generators(N, dtype=W.dtype)
     R = expm(xi[0]*S1 + xi[1]*S2 + xi[2]*S3)
     return R@W@R.T.conj()
 

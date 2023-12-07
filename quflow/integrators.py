@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.linalg
 import inspect
+import numba as nb
 
 from .laplacian import solve_poisson, solve_heat
 from .laplacian import select_skewherm as select_skewherm_laplacian
@@ -59,6 +60,14 @@ commutator = commutator_skewherm
 def project_skewherm(W):
     W /= 2.0
     W -= W.conj().T
+
+
+@nb.njit(parallel=False, fastmath=True)
+def conj_subtract_(a, out):
+    N = a.shape[0]
+    for i in nb.prange(N):
+        for j in range(N):
+            out[i, j] = a[i, j] - np.conj(a[j, i])
 
 
 # Function to update solver statistics
@@ -602,7 +611,7 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
     Whalf = np.zeros_like(W)
     PWcomm = np.zeros_like(W)
     PWPhalf = np.zeros_like(W)
-    hhalf = stepsize/2
+    hhalf = stepsize/2.0
 
     # Specify tolerance if needed
     if tol == "auto" or tol < 0:
@@ -637,8 +646,9 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
             # if hamiltonian_accepts_out:
             #     hamiltonian(Whalf, out=Phalf)
             # else:
-            Phalf = hamiltonian(Whalf)
-            Phalf *= hhalf
+            Phalf = hhalf*hamiltonian(Whalf)
+            # np.multiply(Phalf, hhalfz, out=Phalf)
+            # Phalf *= hhalf
 
             # Compute middle variables
             # PWcomm = Phalf @ Whalf  # old
@@ -647,6 +657,7 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
             np.matmul(PWcomm, Phalf, out=PWPhalf)
             if _SKEW_HERM_:
                 PWcomm -= PWcomm.conj().T
+                # conj_subtract_(PWcomm, PWcomm)
             else:
                 PWcomm -= Whalf @ Phalf
 
@@ -665,13 +676,15 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
                 FW *= hhalf
                 dW += FW
 
-            # Compute error
-            resnorm_old = resnorm
-            resnorm = scipy.linalg.norm(dW - dW_old, ord=np.inf)
-
-            # Check error
-            if i+1 >= minit and (resnorm <= tol or resnorm >= resnorm_old):
-                break
+            # Check if time to break
+            if i+1 >= minit:
+                # Compute error
+                resnorm_old = resnorm
+                dW_old -= dW
+                resnorm = scipy.linalg.norm(dW_old, ord=np.inf)
+                # resnorm = np.abs(dW - dW_old).max()
+                if resnorm <= tol or resnorm >= resnorm_old:
+                    break
 
         else:
             # We used maxit iterations

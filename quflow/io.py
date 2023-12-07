@@ -237,7 +237,7 @@ class QuData2(object):
     Notice that the same object can hold data for several `qutype`.
     """
 
-    def __init__(self, filename, filemode='a', qtype='shr'):
+    def __init__(self, filename, filemode='a'):
         """
 
 
@@ -248,19 +248,45 @@ class QuData2(object):
         qtype
         """
         self.filename = filename
-        self.qtype = qtype
+        self.filemode = filemode
 
     def __call__(self, state, delta_time, delta_steps=None, **kwargs):
         """
 
         Parameters
         ----------
-        state
-        delta_time
-        delta_steps
-        kwargs
-
+        state: ndarray or dict of ndarrays
+        delta_time: float
+        delta_steps: int
+        kwargs: other variables to save
         """
+        try:
+            f = h5py.File(self.filename, "r")
+        except IOError or KeyError:
+            pass
+        else:
+            try:
+                # attrs.update(f[datapath].attrs)
+                attrs['qtime_last'] = f[datapath+'qtime'][-1]
+                attrs['qtime_start'] = attrs['qtime_last']
+                attrs['cache_steps'] = 0
+                if self.verbatim:
+                    print("Found data in file {} at qtime = {}.".format(self.filename, attrs['qtime_start']))
+            except KeyError:
+                pass
+            else:
+                if datapath+'W_cache' in f \
+                        and datapath+'qtime_cache' in f \
+                        and f[datapath+'W_cache'].shape[0] == cache_size:
+                    attrs['W_cache'] = f[datapath+'W_cache'][...]
+                    attrs['qtime_cache'] = f[datapath+'qtime_cache'][...]
+                    attrs['cache_steps'] = f[datapath].attrs['cache_steps']
+                else:
+                    assert attrs['cache_steps'] == 0, "W_cache is not saved and cache_steps is still non-zero."
+            f.close()
+
+    def init_state_(self):
+        pass
 
 
 # ----------------------
