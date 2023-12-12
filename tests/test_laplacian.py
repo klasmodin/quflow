@@ -125,7 +125,7 @@ def test_laplace(N, qulap, skewh):
     np.testing.assert_allclose(W, Wexact)
 
 
-@pytest.mark.parametrize("N", [33, 64, 128])
+@pytest.mark.parametrize("N", [33, 64, 101])
 @pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu, qusparse, qutridiagonal])
 @pytest.mark.parametrize("skewh", [True, False])
 def test_solve_poisson(N, qulap, skewh):

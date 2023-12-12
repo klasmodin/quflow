@@ -600,10 +600,10 @@ def solve_heat(h_times_nu, W0):
     else:
         heat = _gpu_heat_cache[(N, h_times_nu)]
 
-    Wh = _gpu_buffer_cache[N]['P']
+    Wh = _gpu_buffer_cache[(N, W0.dtype)]['P']
     solve_gpu_(heat, W0, Wh,
-               _gpu_buffer_cache[N]['float'],
-               _gpu_buffer_cache[N]['complex'])
+               _gpu_buffer_cache[(N, W0.dtype)]['float'],
+               _gpu_buffer_cache[(N, W0.dtype)]['complex'])
 
     return Wh
 
@@ -645,10 +645,10 @@ def solve_helmholtz(W, alpha=1.0):
     else:
         helmholtz = _gpu_helmholtz_cache[(N, alpha)]
 
-    P = _gpu_buffer_cache[N]['P']
+    P = _gpu_buffer_cache[(N, W.dtype)]['P']
     solve_gpu_(helmholtz, W, P,
-               _gpu_buffer_cache[N]['float'],
-               _gpu_buffer_cache[N]['complex'])
+               _gpu_buffer_cache[(N, W.dtype)]['float'],
+               _gpu_buffer_cache[(N, W.dtype)]['complex'])
 
     return P
 
@@ -701,7 +701,7 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
     else:
         viscdamp = _gpu_viscdamp_cache[(N, h, nu, alpha)]
 
-    Wh = _gpu_buffer_cache[N]['P']
+    Wh = _gpu_buffer_cache[(N, W0.dtype)]['P']
 
     # Prepare right hand side in Crank-Nicolson
     if theta == 1:
@@ -713,7 +713,7 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
         Wrhs += h*force
 
     solve_gpu_(viscdamp, Wrhs, Wh,
-               _gpu_buffer_cache[N]['float'],
-               _gpu_buffer_cache[N]['complex'])
+               _gpu_buffer_cache[(N, W0.dtype)]['float'],
+               _gpu_buffer_cache[(N, W0.dtype)]['complex'])
 
     return Wh

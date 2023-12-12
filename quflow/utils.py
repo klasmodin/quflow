@@ -2,7 +2,6 @@ import numpy as np
 import pyssht
 import os
 from numba import njit, prange
-from scipy.linalg import expm
 
 
 def poisson_finite_differences(omegafun, psifun):
@@ -143,47 +142,6 @@ def sphgrid(N):
     return theta, phi
 
 
-def so3generators(N, dtype=np.complex128):
-    """
-    Return a basis S1, S2, S3 for the representationn of so(3) in u(N).
-
-    Parameters
-    ----------
-    N: int
-    dtype: array type
-
-    Returns
-    -------
-    S1, S2, S3: tuple of ndarray
-    """
-    s = (N-1)/2
-    S3 = 1j*np.diag(np.arange(-s, s+1))
-    S1 = 1j*np.diag(np.sqrt(s*(s+1)-np.arange(-s, s)*np.arange(-s+1, s+1)), 1)/2 + \
-        1j*np.diag(np.sqrt(s*(s+1)-np.arange(-s, s)*np.arange(-s+1, s+1)), -1)/2
-    S2 = np.diag(np.sqrt(s*(s+1)-np.arange(-s, s)*np.arange(-s+1, s+1)), 1)/2 - \
-        np.diag(np.sqrt(s*(s+1)-np.arange(-s, s)*np.arange(-s+1, s+1)), -1)/2
-    return S1.astype(dtype), S2.astype(dtype), S3.astype(dtype)
-
-
-def rotate(xi, W):
-    """
-    Apply axis-angle (Rodrigues) rotation to vorticity matrix.
-
-    Parameters
-    ----------
-    xi: ndarray(shape=(3,), dtype=float)
-    W: ndarray(shape=(N,N), dtype=complex)
-
-    Returns
-    -------
-    W_rotated: ndarray(shape=(N,N), dtype=complex)
-    """
-    N = W.shape[0]
-    S1, S2, S3 = so3generators(N, dtype=W.dtype)
-    R = expm(xi[0]*S1 + xi[1]*S2 + xi[2]*S3)
-    return R@W@R.T.conj()
-
-
 def qtime2seconds(qtime, N):
     """
     Convert quantum time units to seconds.
@@ -197,7 +155,9 @@ def qtime2seconds(qtime, N):
     -------
     Time in seconds.
     """
-    return qtime*np.sqrt(16.*np.pi)/N**(3./2.)
+    # return qtime*np.sqrt(16.*np.pi)/N**(3./2.)
+    hbar = 2.0/np.sqrt(N**2-1)
+    return qtime*hbar
 
 
 def seconds2qtime(t, N):
@@ -213,7 +173,9 @@ def seconds2qtime(t, N):
     -------
     Time in quantum time units.
     """
-    return t/np.sqrt(16.*np.pi)*N**(3./2.)
+    # return t/np.sqrt(16.*np.pi)*N**(3./2.)
+    hbar = 2.0/np.sqrt(N**2-1)
+    return t/hbar
 
 
 def run_cluster(filename, time, inner_time, step_size):

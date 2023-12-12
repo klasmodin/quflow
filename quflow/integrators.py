@@ -5,6 +5,7 @@ import numba as nb
 
 from .laplacian import solve_poisson, solve_heat
 from .laplacian import select_skewherm as select_skewherm_laplacian
+from .geometry import norm_Linf
 
 # ----------------
 # GLOBAL VARIABLES
@@ -105,6 +106,36 @@ def select_skewherm(flag):
         commutator = commutator_generic
         _SKEW_HERM_ = False
     select_skewherm_laplacian(flag)
+
+
+def estimate_stepsize(W, P=None, safety_factor=0.1):
+    """
+    If `lambda_max` is the maximum eigenvalue of `P`, which is
+    assumed to vary slowly as compared with `W` (i.e., we assume
+    that `P` is constant), then an estimate to the stepsize
+    is safety_factor*pi/lambda_max.
+    This stepsize is dimension-free, so the same estimate can be
+    used for any matrix size `N`.
+    The corresponding time-step in seconds is delta_time = stepsize*hbar.
+
+    Parameters
+    ----------
+    W: ndarray
+        Vorticity state.
+    P: ndarray
+        Stream matrix (assumed to vary slow compared to W).
+    safety_factor:
+        Multiply by this safety factor.
+
+    Returns
+    -------
+    stepsize (float)
+    """
+    if P is None:
+        P = solve_poisson(W)
+    lambda_max = norm_Linf(P)
+    stepsize = safety_factor*np.pi/lambda_max
+    return stepsize
 
 
 # -------------------------------------------------

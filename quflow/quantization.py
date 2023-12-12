@@ -71,6 +71,9 @@ def compute_basis(N):
         end_ind = start_ind + n
         v2, w2 = eigh_tridiagonal(lap[1, start_ind:end_ind], lap[0, start_ind+1:end_ind])
 
+        # Rescale to get correct L2 scaling
+        w2 *= np.sqrt(N)
+
         # Reverse the order
         w2 = w2[:, ::-1]
 
@@ -166,6 +169,8 @@ def mat2shr_(W, basis, omega_out):
             omega_neg_m_ind = elm2ind(np.arange(m, N), -m)
             omega_out[omega_neg_m_ind] = -np.sqrt(2)*sgn*omega_partial_complex.real
 
+    omega_out /= N
+
 
 @njit
 def shc2mat_(omega, basis, W_out):
@@ -225,7 +230,7 @@ def mat2shc_(W, basis, omega_out):
             sgn = 1 if m % 2 == 0 else -1
             omega_out[omega_m_ind] = sgn*diag_m@basis_m_mat
 
-    omega_out /= 1.0j
+    omega_out /= 1.0j*N
 
 
 # ----------------------

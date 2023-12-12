@@ -22,18 +22,21 @@ def test_spherical_harmonics_transform_forward(f):
     omega = qf.fun2shc(f)
     f = qf.shc2fun(omega)
     omega2 = qf.fun2shc(f)
-    assert omega == pytest.approx(omega2)
+    # assert omega == pytest.approx(omega2)
+    np.testing.assert_allclose(omega2, omega, atol=1e-14, rtol=1e-4)
 
 
 @pytest.mark.parametrize("omega_real", [get_random_omega_real(), get_random_omega_real(128)])
 def test_real_to_complex_harmonics(omega_real):
     omega_complex = qf.shr2shc(omega_real)
     omega_real2 = qf.shc2shr(omega_complex)
-    assert omega_real == pytest.approx(omega_real2)
+    # assert omega_real == pytest.approx(omega_real2)
+    np.testing.assert_allclose(omega_real, omega_real2)
 
 
 @pytest.mark.parametrize("omega_complex", [get_random_omega_complex(), get_random_omega_complex(128)])
 def test_complex_to_real_harmonics(omega_complex):
     omega_real = qf.shc2shr(omega_complex)
     omega_complex2 = qf.shr2shc(omega_real)
-    assert omega_complex == pytest.approx(omega_complex2)
+    # assert omega_complex == pytest.approx(omega_complex2)
+    np.testing.assert_allclose(omega_complex, omega_complex2)

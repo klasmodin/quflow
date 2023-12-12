@@ -2,7 +2,8 @@ import numpy as np
 
 from .laplacian import solve_poisson, solve_heat
 from .integrators import isomp
-from .utils import seconds2qtime, rotate
+from .utils import seconds2qtime
+from .geometry import rotate
 from .quantization import get_basis
 from numba import njit, prange
 

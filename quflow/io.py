@@ -23,7 +23,7 @@ _basis_path_default = appdirs.user_data_dir(_app_name, False)
 #     Win 7/10:     C:\Users\<username>\AppData\Local\<AppAuthor>\<AppName>
 
 _basis_filename_default = "quflow_basis.hdf5"
-_basis_file_version = 0.1
+_basis_file_version = 0.2
 
 
 # ---------------------

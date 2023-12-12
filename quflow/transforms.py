@@ -30,6 +30,7 @@ def fun2shc(f):
 
     # Transform to spherical harmonics
     omega = pyssht.forward(f, N, Reality=True if np.isrealobj(f) else False)
+    omega /= np.sqrt(4*np.pi)
 
     return omega
 
@@ -74,6 +75,7 @@ def shc2fun(omega, isreal=False, N=-1):
 
     # Transform to function values
     f = pyssht.inverse(omega, N, Reality=isreal)
+    f *= np.sqrt(4*np.pi)
 
     return f
 
