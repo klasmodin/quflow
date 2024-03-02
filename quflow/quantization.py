@@ -143,7 +143,7 @@ def shr2mat_(omega, basis, W_out):
 
 @njit
 def mat2shr_(W, basis, omega_out):
-    N = W.shape[0]
+    N = W.shape[-1]
     basis_break_indices = np.zeros((N+1,), dtype=np.int32)
     basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
@@ -183,7 +183,7 @@ def shc2mat_(omega, basis, W_out):
     basis: ndarray, shape (np.sum(np.arange(N)**2),)
     W_out: ndarray, shape (N,N)
     """
-    N = W_out.shape[0]
+    N = W_out.shape[-1]
     basis_break_indices = np.zeros((N+1,), dtype=np.int32)
     basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 

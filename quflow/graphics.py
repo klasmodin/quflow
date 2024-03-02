@@ -390,7 +390,7 @@ def plot(data, ax=None, symmetric=False, colorbar=True, use_ticks=True,
 
 
 def plot2(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=False, title=None,
-          xlabel="azimuth", ylabel="elevation", padding=None, N=None,
+          xlabel="azimuth", ylabel="elevation", padding=None, N=None, time=None,
           central_latitude=20, central_longitude=30, **kwargs):
     """
     Better plot quantized function.
@@ -417,6 +417,8 @@ def plot2(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fa
         Amount (in pixels) of extra padding around image.
     N: int or None (default None)
         Up- or downsample to resolution N in plot.
+    time: int or None (default None)
+        Display time tag in plot.
     central_latitude: float (default 20)
         Latitude orientation (in degrees) for `projections='orthographic'`.
     central_longitude: float (default 30)
@@ -530,6 +532,12 @@ def plot2(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fa
             ax.grid(linestyle='-', **gridargs)
     ax.set_xticklabels([])
     ax.set_yticklabels([])
+
+    # add text with time-tag
+    if time is not None:
+        # place a text box in upper left in axes coords
+        textstr = "time: {:.2f}".format(time)
+        ax.text(0.05, 0.95, textstr, transform=ax.transAxes, verticalalignment='top')
     if colorbar:
         im.figure.colorbar(mappable=im, cax=cax)
 
@@ -538,7 +546,7 @@ def plot2(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fa
 
 def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_args=None,
                       codec='h264', title='QUFLOW animation',
-                      progress_bar=True, progress_file=None, data2fun=as_fun, **kwargs):
+                      progress_bar=True, progress_file=None, time=None, data2fun=as_fun, **kwargs):
     """
     Parameters
     ----------
@@ -600,6 +608,11 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
 
         im = plot2(f0, **kwargs)
 
+        if time is not None:
+            ax = im.axes
+            textstr = "time: {}".format(time[0])
+            timetag = ax.text(0.05, 0.95, textstr, transform=ax.transAxes, verticalalignment='top')
+
         with writer.saving(im.figure, filename, dpi=100):
 
             if progress_bar and progress_file is None:
@@ -624,6 +637,9 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
                     im.set_array(fun.ravel())
                 else:
                     raise NotImplementedError("Could not find method for setting data.")
+                if time is not None:
+                    textstr = "time: {:.2f}".format(time[k])
+                    timetag.set_text(textstr)
                 writer.grab_frame()
 
         # Close figure (so it doesn't show up interactively)

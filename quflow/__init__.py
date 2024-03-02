@@ -11,4 +11,4 @@ from .analysis import scale_decomposition
 from . import integrators
 from . import geometry
 
-__version__ = '0.0.5'
+__version__ = '0.0.6'

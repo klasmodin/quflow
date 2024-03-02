@@ -63,12 +63,22 @@ def project_skewherm(W):
     W -= W.conj().T
 
 
-@nb.njit(parallel=False, fastmath=True)
+@nb.njit(error_model='numpy', fastmath=True)
 def conj_subtract_(a, out):
-    N = a.shape[0]
-    for i in nb.prange(N):
-        for j in range(N):
-            out[i, j] = a[i, j] - np.conj(a[j, i])
+    N = a.shape[-1]
+    if a.ndim == 2:
+        for i in range(N):
+            out[i, i] = a[i, i] - np.conj(a[i, i])
+            for j in range(i):
+                out[i, j] = a[i, j] - np.conj(a[j, i])
+                out[j, i] = -np.conj(out[i, j])
+    elif a.ndim == 3:
+        for k in range(a.shape[0]):
+            for i in range(N):
+                out[k, i, i] = a[k, i, i] - np.conj(a[k, i, i])
+                for j in range(i):
+                    out[k, i, j] = a[k, i, j] - np.conj(a[k, j, i])
+                    out[k, j, i] = -np.conj(out[k, i, j])
 
 
 # Function to update solver statistics
@@ -297,7 +307,7 @@ classical = rk4
 # -------------------
 
 def isomp_quasinewton(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None,
-                      tol=1e-8, maxit=10, verbatim=False):
+                      tol="auto", maxit=10, verbatim=False):
     """
     Time-stepping by isospectral midpoint second order method using
     a quasi-Newton iteration scheme. This scheme preserves the eigen-spectrum
@@ -331,6 +341,10 @@ def isomp_quasinewton(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
 
     if not _SKEW_HERM_:
         assert NotImplementedError("isomp_quasinewton might not work for non-skewherm.")
+
+    # Specify tolerance if needed
+    if tol == "auto" or tol < 0:
+        tol = np.finfo(W.dtype).eps*stepsize*np.linalg.norm(W, np.inf)
 
     Id = np.eye(W.shape[0])
 
@@ -608,7 +622,7 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
         Print extra information if True. Default is False.
     compsum: bool
         Use compensated summation.
-    reinitiate: bool
+    reinitialize: bool
         Whether to re-initiate the iteration vector at every step.
 
     Returns
@@ -641,12 +655,15 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
     dW_old = np.zeros_like(W)
     Whalf = np.zeros_like(W)
     PWcomm = np.zeros_like(W)
-    PWPhalf = np.zeros_like(W)
+    # PWPhalf = np.zeros_like(W)
     hhalf = stepsize/2.0
 
     # Specify tolerance if needed
     if tol == "auto" or tol < 0:
-        tol = np.finfo(W.dtype).eps*stepsize*np.linalg.norm(W, np.inf)
+        if W.ndim > 2:
+            tol = np.finfo(W.dtype).eps*stepsize*np.linalg.norm(W[*(0,)*(W.ndim-2), :, :], np.inf)
+        else:
+            tol = np.finfo(W.dtype).eps*stepsize*np.linalg.norm(W, np.inf)
 
     # Variables for compensated summation
     if compsum:
@@ -673,29 +690,29 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
             np.copyto(Whalf, W)
             Whalf += dW
 
+            # Save dW from previous step
+            np.copyto(dW_old, dW)
+
             # Update Ptilde
-            # if hamiltonian_accepts_out:
-            #     hamiltonian(Whalf, out=Phalf)
-            # else:
-            Phalf = hhalf*hamiltonian(Whalf)
-            # np.multiply(Phalf, hhalfz, out=Phalf)
-            # Phalf *= hhalf
+            Phalf = hamiltonian(Whalf)
+            Phalf *= hhalf
 
             # Compute middle variables
             # PWcomm = Phalf @ Whalf  # old
             np.matmul(Phalf, Whalf, out=PWcomm)
             # PWPhalf = PWcomm @ Phalf  # old
-            np.matmul(PWcomm, Phalf, out=PWPhalf)
+            # np.matmul(PWcomm, Phalf, out=PWPhalf)
+            np.matmul(PWcomm, Phalf, out=dW)  # More efficient, as PWPhalf is not needed
             if _SKEW_HERM_:
-                PWcomm -= PWcomm.conj().T
-                # conj_subtract_(PWcomm, PWcomm)
+                # np.conjugate(PWcomm)
+                # PWcomm -= PWcomm.conj().T
+                conj_subtract_(PWcomm, PWcomm)
             else:
                 PWcomm -= Whalf @ Phalf
 
             # Update dW
-            np.copyto(dW_old, dW)
-            np.copyto(dW, PWcomm)
-            dW += PWPhalf
+            # np.copyto(dW, PWPhalf)
+            dW += PWcomm
 
             # Add forcing if needed
             if forcing:
@@ -712,8 +729,14 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
                 # Compute error
                 resnorm_old = resnorm
                 dW_old -= dW
-                resnorm = scipy.linalg.norm(dW_old, ord=np.inf)
-                # resnorm = np.abs(dW - dW_old).max()
+                if dW_old.ndim > 2:
+                    resnormvec = scipy.linalg.norm(dW_old, ord=np.inf, axis=(-1, -2))
+                    if Phalf.ndim == 2:
+                        resnorm = resnormvec[0]
+                    else:
+                        resnorm = resnormvec.max()
+                else:
+                    resnorm = scipy.linalg.norm(dW_old, ord=np.inf)
                 if resnorm <= tol or resnorm >= resnorm_old:
                     break
 

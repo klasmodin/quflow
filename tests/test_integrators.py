@@ -18,9 +18,6 @@ def get_random_mat(N=5, zero_trace=True, skewh=True):
     return W
 
 
-def get_reference_solution():
-    pass
-
 @pytest.mark.parametrize("N", [5, 16, 61])
 def test_compare_isomp_rk4(N):
     np.random.seed(42)
@@ -39,6 +36,25 @@ def test_compare_isomp_rk4(N):
 @pytest.mark.parametrize("use_compsum", [False, True])
 @pytest.mark.parametrize("tol", ['auto', 1e-10])
 def test_isomp_against_ref(use_compsum, tol):
+    W0, Wfinal, stepsize, steps = get_isomp_reference_solution()
+
+    W = W0.copy()
+    W = qf.integrators.isomp(W, stepsize, steps, compsum=use_compsum, tol=tol)
+    np.testing.assert_allclose(W, Wfinal, rtol=0, atol=1e-7)
+
+
+@pytest.mark.parametrize("tol", ['auto', 1e-10])
+def test_isomp_quasinewton_against_ref(tol):
+    W0, Wfinal, stepsize, steps = get_isomp_reference_solution()
+
+    W = W0.copy()
+    W = qf.integrators.isomp_quasinewton(W, stepsize, steps, tol=tol)
+    np.testing.assert_allclose(W, Wfinal, rtol=0, atol=1e-7)
+
+
+def get_isomp_reference_solution():
+    stepsize = 0.02
+    steps = 500
     W0 = np.array([[0. + 2.36826706e+00j, 0.13588038 + 4.04463666e-03j,
                     -0.07331627 - 1.46998132e-01j, 0.14582599 - 0.00000000e+00j,
                     0. + 0.00000000e+00j, -0. + 0.00000000e+00j,
@@ -296,9 +312,5 @@ def test_isomp_against_ref(use_compsum, tol):
                         -5.39654120e-02 + 4.41918649e-02j, -1.37067754e-01 - 1.37132748e-02j,
                         2.38875281e-01 - 4.23026856e-02j, -2.67074603e-01 + 3.81331646e-01j,
                         -2.72704961e-01 + 1.12290117e+00j, 0.00000000e+00 + 2.06200782e+00j]], dtype=np.complex128)
-    stepsize = 0.02
-    steps = 500
-    W = W0.copy()
-    W = qf.integrators.isomp(W, stepsize, steps, compsum=use_compsum, tol=tol)
 
-    np.testing.assert_allclose(W, Wfinal, rtol=0, atol=1e-7)
+    return W0, Wfinal, stepsize, steps

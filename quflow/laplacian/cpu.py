@@ -10,12 +10,22 @@ _cpu_buffer_cache = dict()
 _cpu_heat_cache = dict()
 _cpu_helmholtz_cache = dict()
 _cpu_viscdamp_cache = dict()
+_cpu_cache = dict()
 
 
 # ---------------------
 # LOWER LEVEL FUNCTIONS
 # ---------------------
 
+def _get_cache(shape, dtype, *args):
+    global _cpu_cache
+    key = (shape, dtype, *args)
+    if key not in _cpu_cache:
+        if "real" in args:
+            _cpu_cache[key] = np.zeros(shape, dtype=dtype).real
+        else:
+            _cpu_cache[key] = np.zeros(shape, dtype=dtype)
+    return _cpu_cache[key]
 
 @njit
 def mk2ij(m, k):
@@ -479,7 +489,7 @@ def laplace(P):
     -------
     W: ndarray(shape=(N, N), dtype=complex)
     """
-    N = P.shape[0]
+    N = P.shape[-1]
     lap = laplacian(N, dtype=type(P[0, 0].real))
 
     # Apply dot product
@@ -489,28 +499,44 @@ def laplace(P):
     return W
 
 
-def solve_poisson(W):
+def select_first(W):
+    return np.ascontiguousarray(W[*((0,)*(W.ndim-2)), :, :])
+
+
+def select_sum(W):
+    return W.sum(axis=tuple(range(W.ndim-2)))
+
+
+def solve_poisson(W, reduce=select_first):
     """
     Return stream matrix `P` for `W`.
 
     Parameters
     ----------
-    W: ndarray(shape=(N, N), dtype=complex)
+    W: ndarray(shape=(N, N) or (k, N, N), dtype=complex)
+    reduce: callable(W)
 
     Returns
     -------
     P: ndarray(shape=(N, N), dtype=complex)
     """
-    N = W.shape[0]
-    lap = laplacian(N, bc=True)
+    if W.ndim >= 3:
+        W = reduce(W)
+    W_shape = W.shape
+    N = W_shape[-1]
+    lap = laplacian(N, bc=True, dtype=type(W[0, 0].real))
 
-    if N not in _cpu_buffer_cache or W.dtype != _cpu_buffer_cache[N]['complex'].dtype:
-        allocate_buffer(W)
+    # if N not in _cpu_buffer_cache or W.dtype != _cpu_buffer_cache[N]['complex'].dtype:
+    #     allocate_buffer(W)
 
-    P = _cpu_buffer_cache[N]['P']
+    # P = _cpu_buffer_cache[N]['P']
+    P = _get_cache(W_shape, W.dtype)
     solve_cpu_(lap, W, P,
-               _cpu_buffer_cache[N]['float'],
-               _cpu_buffer_cache[N]['complex'])
+               # _cpu_buffer_cache[N]['float'],
+               _get_cache(W_shape, W.dtype, "real"),
+               # _cpu_buffer_cache[N]['complex']
+               _get_cache(W_shape, W.dtype, "complex"),
+            )
 
     return P
 

@@ -7,6 +7,7 @@ import h5py
 import appdirs
 import datetime
 import time
+# from quflow import solve_poisson
 
 # ----------------
 # GLOBAL VARIABLES
@@ -201,92 +202,6 @@ def determine_qtype(data, N=None):
             qtype = 'fun'
 
     return qtype, issequence
-
-
-# ----------------------
-# QUDATA2 CLASS DEF
-# ----------------------
-
-class QuData2(object):
-    """
-    An object from here can be used as a callback for the `quflow.solve` function.
-    It represents output data from a simulation, stored on disk as an HDF5 file.
-    The data may be stored in either of the following formats
-    (specified by a string referred to as `qutype`):
-
-    'mat'
-    Vorticity matrix.
-    shape = (;;, N, N)
-    dtype = complex
-
-    'shr'
-    Real spherical harmonics.
-    shape = (;;, N**2)
-    dtype = real
-
-    'shc'
-    Spherical harmonics
-    shape = (;;, N**2)
-    dtype = complex
-
-    'fun'
-    Function values in spherical coordinates
-    shape = (;;, 2*N, N)
-    dtype = real or complex
-
-    Notice that the same object can hold data for several `qutype`.
-    """
-
-    def __init__(self, filename, filemode='a'):
-        """
-
-
-        Parameters
-        ----------
-        filename
-        filemode
-        qtype
-        """
-        self.filename = filename
-        self.filemode = filemode
-
-    def __call__(self, state, delta_time, delta_steps=None, **kwargs):
-        """
-
-        Parameters
-        ----------
-        state: ndarray or dict of ndarrays
-        delta_time: float
-        delta_steps: int
-        kwargs: other variables to save
-        """
-        try:
-            f = h5py.File(self.filename, "r")
-        except IOError or KeyError:
-            pass
-        else:
-            try:
-                # attrs.update(f[datapath].attrs)
-                attrs['qtime_last'] = f[datapath+'qtime'][-1]
-                attrs['qtime_start'] = attrs['qtime_last']
-                attrs['cache_steps'] = 0
-                if self.verbatim:
-                    print("Found data in file {} at qtime = {}.".format(self.filename, attrs['qtime_start']))
-            except KeyError:
-                pass
-            else:
-                if datapath+'W_cache' in f \
-                        and datapath+'qtime_cache' in f \
-                        and f[datapath+'W_cache'].shape[0] == cache_size:
-                    attrs['W_cache'] = f[datapath+'W_cache'][...]
-                    attrs['qtime_cache'] = f[datapath+'qtime_cache'][...]
-                    attrs['cache_steps'] = f[datapath].attrs['cache_steps']
-                else:
-                    assert attrs['cache_steps'] == 0, "W_cache is not saved and cache_steps is still non-zero."
-            f.close()
-
-    def init_state_(self):
-        pass
 
 
 # ----------------------

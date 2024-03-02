@@ -126,6 +126,21 @@ def test_laplace(N, qulap, skewh):
 
 
 @pytest.mark.parametrize("N", [33, 64, 101])
+def test_solve_poisson_multistate(N):
+    W0 = get_smooth_mat(N)
+    W1 = get_random_mat(N)
+
+    W = np.zeros((2, N, N), dtype=W1.dtype)
+    W[0, :, :] = W0
+    W[1, :, :] = W1
+
+    Plarge = qf.solve_poisson(W)
+    P0 = qf.solve_poisson(W0)
+
+    np.testing.assert_allclose(Plarge, P0)
+
+
+@pytest.mark.parametrize("N", [33, 64, 101])
 @pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu, qusparse, qutridiagonal])
 @pytest.mark.parametrize("skewh", [True, False])
 def test_solve_poisson(N, qulap, skewh):

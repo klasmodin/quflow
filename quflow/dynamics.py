@@ -159,7 +159,7 @@ def solve(W, stepsize=0.1, steps=None, time=None,
         Now deprecated since **kwargs are also passed to the method.
     callback: callable(W, inner_steps, inner_time, **callback_kwargs)
         The callback function evaluated every outer step.
-        It uses **kwargs as extra keyword arguments.
+        It uses **callback_kwargs as extra keyword arguments.
         It is not evaluated at the initial time.
     callback_kwargs: dict
         Extra keyword arguments to send to callback at each output step.
@@ -205,7 +205,6 @@ def solve(W, stepsize=0.1, steps=None, time=None,
     # print('no output steps: ', steps//inner_steps)
     # assert False, "Aborting!"
 
-
     # Create progressbar
     if progress_bar:
         try:
@@ -225,7 +224,7 @@ def solve(W, stepsize=0.1, steps=None, time=None,
             no_steps = steps-k
         else:
             no_steps = inner_steps
-        method(W, stepsize, steps=no_steps, **method_kwargs)
+        W = method(W, stepsize, steps=no_steps, **method_kwargs)
         delta_time = seconds2qtime(no_steps*np.abs(stepsize), N=N)
         if progress_bar:
             pbar.update(no_steps)
