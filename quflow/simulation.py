@@ -1,5 +1,4 @@
 import numpy as np
-from .utils import elm2ind, qtime2seconds
 import os
 import os.path
 import h5py
@@ -9,6 +8,10 @@ import time
 from .quantization import mat2shc
 from .quantization import mat2shr
 from .transforms import shc2fun, shr2fun
+from .laplacian import solve_poisson
+from .integrators import isomp
+from .utils import elm2ind, qtime2seconds, seconds2qtime
+
 # from quflow import solve_poisson
 
 # ----------------
@@ -16,6 +19,7 @@ from .transforms import shc2fun, shr2fun
 # ----------------
 
 _default_qutypes = {'mat': None, 'fun': np.float32}
+_default_qutype2varname = {'mat': 'mat', 'fun': 'fun', 'shr': 'shr', 'shc': 'shc'}
 
 
 # ----------------------
@@ -57,7 +61,7 @@ class QuSimulation(object):
                  qutypes: dict = None,
                  datapath: str = "/",
                  overwrite: bool = False,
-                 verbose: bool = False,
+                 loggers: dict = None,
                  W: np.ndarray = None,
                  time=None,
                  **kwargs):
@@ -79,11 +83,17 @@ class QuSimulation(object):
         from . import __version__
 
         self.filename = filename
+        if datapath[-1] is not "/":
+            raise ValueError("Datapath must end with /")
         self.datapath = datapath
         self.attrs = dict()
         self.fieldnames = dict()
+        self.loggers = loggers if loggers is not None else dict()
 
         if not os.path.exists(filename) or overwrite:
+            if W is None:
+                raise ValueError("At least W must be provided to initialize a QuSimulation.")
+
             if qutypes is None:
                 self.qutypes = _default_qutypes
             else:
@@ -91,9 +101,14 @@ class QuSimulation(object):
 
             # Create or overwrite file
             with h5py.File(self.filename, "w") as f:
+                if self.datapath is not "/":
+                    f.create_group(self.datapath)
                 f[self.datapath].attrs["version"] = __version__
                 f[self.datapath].attrs["created"] = datetime.datetime.now().isoformat()
                 f[self.datapath].attrs["qutypes"] = np.array([pickle.dumps(self.qutypes)])
+
+            # Add fields
+            self.initialize_field(W=W, time=time if time is not None else 0.0, **kwargs)
 
         else:
             with h5py.File(self.filename, "r") as f:
@@ -101,12 +116,10 @@ class QuSimulation(object):
                     exec(f[self.datapath].attrs["prerun"], globals())
                 self.qutypes = pickle.loads(f[self.datapath].attrs["qutypes"][0])
                 if qutypes is not None:
-                    ValueError(self.filename + " has already been initialized with qutypes.")
+                    raise ValueError(self.filename + " has already been initialized with qutypes.")
                 if "N" in f[self.datapath].attrs and W is not None:
-                    ValueError(self.filename + " has already been initialized with W.")
+                    raise ValueError(self.filename + " has already been initialized with W.")
 
-        # Add fields
-        self.initialize_field(W, time=time if time is not None else 0.0, **kwargs)
 
         # Update attrs
         with h5py.File(self.filename, "r") as f:
@@ -160,7 +173,7 @@ class QuSimulation(object):
     def qutypes_iterator(self, W, qutype2varname=None):
         N = W.shape[-1]
         if qutype2varname is None:
-            qutype2varname = {'mat': 'W', 'fun': 'omegav', 'shr': 'omegar', 'shc': 'omegac'}
+            qutype2varname = _default_qutype2varname
         for qutype, dtype in self.qutypes.items():
             isreal = np.isrealobj(np.array([], dtype=dtype))
             if qutype == 'mat':
@@ -212,11 +225,11 @@ class QuSimulation(object):
 
     def _update_fieldnames(self):
         with h5py.File(self.filename, 'r') as f:
-            for name in f.keys():
-                dataset = f[name]
+            for name in f[self.datapath].keys():
+                dataset = f[self.datapath + name]
                 self.fieldnames.update({name: (dataset.shape, dataset.dtype)})
 
-    def initialize_field(self, W=None, time=0, **kwargs):
+    def initialize_field(self, W, time=0.0, **kwargs):
         try:
             f = h5py.File(self.filename, "r+")
         except IOError:
@@ -240,7 +253,7 @@ class QuSimulation(object):
 
             # Create datasets for time
             timeset = f.create_dataset(self.datapath + "time", (1,),
-                                       dtype=W.ravel()[:1].real.dtype,
+                                       dtype=np.float64,
                                        maxshape=(None,)
                                        )
             timeset[0] = time
@@ -252,7 +265,25 @@ class QuSimulation(object):
                                        )
             stepset[0] = 0
 
+            # Create datasets for loggers
+            for name, logger in self.loggers.items():
+                value = logger(W)
+                if np.isscalar(value):
+                    arr = np.array(value)
+                elif isinstance(value, np.ndarray):
+                    arr = value
+                else:
+                    ValueError("Data {} is not a scalar or a numpy array.".format(value))
+                varset = f.create_dataset(self.datapath + name, (1,) + arr.shape,
+                                          dtype=arr.dtype,
+                                          maxshape=(None,) + arr.shape
+                                          )
+                varset[0, ...] = arr
+
+            # Create datasets for kwargs
             for name, value in kwargs.items():
+                if name in ("time", "step"):
+                    raise ValueError("{} is not a valid field name.".format(name))
                 if np.isscalar(value):
                     arr = np.array(value)
                 elif isinstance(value, np.ndarray):
@@ -298,17 +329,25 @@ class QuSimulation(object):
 
             # Update other fields
             for varname, value in kwargs.items():
-                if self.datapath + varname in f:
+                if self.datapath + varname in f and varname not in self.loggers:
                     varset = f[self.datapath + varname]
                     varset.resize(varset.shape[0]+1, axis=0)
                     varset[-1, ...] = value
+
+            # Update logger fields
+            for name, logger in self.loggers.items():
+                varset = f[self.datapath + name]
+                varset.resize(varset.shape[0]+1, axis=0)
+                value = logger(W)
+                varset[-1, ...] = value
 
 
 # ----------------------
 # SOLVE FUNCTION DEF
 # ----------------------
 
-def solve(W, stepsize=None, steps=None, simtime=None,
+def solve(W, stepsize=None, timestep=None,
+          steps=None, simtime=None,
           inner_steps=None, inner_time=None,
           integrator=isomp,
           callback=None, callback_kwargs=None,
@@ -318,7 +357,7 @@ def solve(W, stepsize=None, steps=None, simtime=None,
 
     Parameters
     ----------
-    W: ndarray(shape=(N, N), dtype=complex)
+    W: ndarray(shape=(N, N) or (k, N, N), dtype=complex)
         Initial vorticity matrix.
     stepsize: None or float
         Stepsize parameter, related to the actual time step length
@@ -382,12 +421,6 @@ def solve(W, stepsize=None, steps=None, simtime=None,
     if inner_steps > steps:
         inner_steps = steps
 
-    # DEBUGGING:
-    # print('steps: ', steps)
-    # print('inner_steps: ', inner_steps)
-    # print('no output steps: ', steps//inner_steps)
-    # assert False, "Aborting!"
-
     # Create progressbar
     if progress_bar:
         try:
@@ -408,12 +441,14 @@ def solve(W, stepsize=None, steps=None, simtime=None,
         else:
             no_steps = inner_steps
         W = integrator(W, stepsize, steps=no_steps, **integrator_kwargs)
-        delta_time = seconds2qtime(no_steps*np.abs(stepsize), N=N)
+        delta_time = qtime2seconds(no_steps*stepsize, N=N)
         if progress_bar:
             pbar.update(no_steps)
         if callback is not None:
             for cfun in callback:
-                cfun(W, inner_time=delta_time, inner_steps=no_steps, **callback_kwargs)
+                if 'stats' in integrator_kwargs and isinstance(integrator_kwargs['stats'], dict):
+                    callback_kwargs.update(integrator_kwargs['stats'])
+                cfun(W, delta_time=delta_time, delta_steps=no_steps, **callback_kwargs)
 
     # Close progressbar
     if progress_bar:
