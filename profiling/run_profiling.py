@@ -152,9 +152,9 @@ with open(filename, 'w') as f:
         try:
             import mkl
         except ImportError:
-            print("MKL BLAS: False")
+            print("MKL module: False")
         else:
-            print("MKL BLAS: True")
+            print("MKL module: True")
             print("MKL cores (get_max_threads): {}".format(mkl.get_max_threads()))
         print("\ndtype: {}".format(dtype))
 
