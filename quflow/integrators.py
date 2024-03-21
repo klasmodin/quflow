@@ -591,8 +591,8 @@ def isomp_fixedpoint(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forc
 
 
 def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None,
-                      tol='auto', maxit=10, minit=1, 
-                      verbatim=False, compsum=False, reinitialize=True):
+                      tol='auto', maxit=10, minit=1, stats=None,
+                      verbatim=False, compsum=False, reinitialize=False):
     """
     Time-stepping by isospectral midpoint second order method for skew-Hermitian W
     using fixed-point iterations. This implementation uses compensated summation
@@ -660,10 +660,18 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
 
     # Specify tolerance if needed
     if tol == "auto" or tol < 0:
+        mach_eps = np.finfo(W.dtype).eps
+        if not compsum:
+            mach_eps = np.sqrt(mach_eps)
         if W.ndim > 2:
-            tol = np.finfo(W.dtype).eps*stepsize*np.linalg.norm(W[*(0,)*(W.ndim-2), :, :], np.inf)
+            zeroind = (0,)*(W.ndim-2) + (Ellipsis,)
+            tol = mach_eps*stepsize*np.linalg.norm(W[zeroind], np.inf)
         else:
-            tol = np.finfo(W.dtype).eps*stepsize*np.linalg.norm(W, np.inf)
+            tol = mach_eps*stepsize*np.linalg.norm(W, np.inf)
+        if verbatim:
+            print("Tolerance set to {}.".format(tol))
+        if stats:
+            stats['tol'] = tol
 
     # Variables for compensated summation
     if compsum:
@@ -792,9 +800,9 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
 
     if verbatim:
         print("Average number of iterations per step: {:.2f}".format(total_iterations/steps))
-    # if stats:
-    #     stats["iteration_average"] = total_iterations/steps
-    #     stats["stepsize"] = stepsize
+    if stats:
+        stats["iterations"] = total_iterations/steps
+        stats["maxit"] = number_of_maxit/steps
     # if integrals:
     #     P = hamiltonian(W)
     #     integrals["energy"] = (P*W).sum()

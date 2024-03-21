@@ -616,7 +616,7 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
         with writer.saving(im.figure, filename, dpi=100):
 
             if progress_bar and progress_file is None:
-                from tqdm.auto import trange
+                from tqdm import trange
                 stepiter = trange(states.shape[0], unit=' frames')
             elif progress_bar:
                 from tqdm import trange

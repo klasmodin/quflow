@@ -21,7 +21,7 @@ def test_init_sim_(W, t, datapath, tmpdir):
     filename = tmpdir.join("testsim.hdf5")
     # filename = "/Users/moklas/Downloads/testsim.hdf5"
 
-    sim = QuSimulation(filename, overwrite=True, datapath=datapath, W=W, time=t, energy=0.0, enstrophy=0.0)
+    sim = QuSimulation(filename, overwrite=True, datapath=datapath, state=W, time=t, energy=0.0, enstrophy=0.0)
     sim['hamiltonian'] = qf.solve_poisson
     sim2 = QuSimulation(filename, datapath=datapath)
 
@@ -37,7 +37,7 @@ def test_init_sim_(W, t, datapath, tmpdir):
 def test_callback(W, datapath, tmpdir):
     filename = tmpdir.join("testsim.hdf5")
     N = W.shape[-1]
-    sim = QuSimulation(filename, overwrite=True, datapath=datapath, W=W, energy=0.7)
+    sim = QuSimulation(filename, overwrite=True, datapath=datapath, state=W, energy=0.7)
 
     Wlist = np.zeros((10, N, N), dtype=np.complex128)
     Wlist[0, ...] = W
@@ -57,7 +57,7 @@ def test_callback(W, datapath, tmpdir):
 def test_qutypes(W, qutypes, tmpdir):
     filename = tmpdir.join("testsim.hdf5")
     N = W.shape[-1]
-    sim = QuSimulation(filename, overwrite=True, qutypes=qutypes, W=W)
+    sim = QuSimulation(filename, overwrite=True, qutypes=qutypes, state=W)
 
     Wlist = np.zeros((10, N, N), dtype=np.complex128)
     Wlist[0, ...] = W
@@ -84,7 +84,7 @@ def test_prerun(W, tmpdir):
     filename = tmpdir.join("testsim.hdf5")
 
     def createsim(W):
-        sim = QuSimulation(filename, overwrite=True, W=W)
+        sim = QuSimulation(filename, overwrite=True, state=W)
 
         def myham(W):
             return 0.5*qf.solve_poisson(W)
@@ -115,7 +115,7 @@ def test_logger(W, tmpdir):
     def vector_output(W):
         return W[:, 0]
 
-    sim = QuSimulation(filename, overwrite=True, W=W, loggers={'normL2': qf.geometry.norm_L2, 'vector': vector_output})
+    sim = QuSimulation(filename, overwrite=True, state=W, loggers={'normL2': qf.geometry.norm_L2, 'vector': vector_output})
 
     Wlist = np.zeros((10, N, N), dtype=np.complex128)
     Wlist[0, ...] = W
@@ -132,7 +132,7 @@ def test_solve(W, tmpdir):
     filename = tmpdir.join("testsim.hdf5")
     N = W.shape[-1]
 
-    sim = QuSimulation(filename, overwrite=True,  W=W, loggers={'normL2': qf.geometry.norm_L2})
+    sim = QuSimulation(filename, overwrite=True,  state=W, loggers={'normL2': qf.geometry.norm_L2})
 
     qf.simulation.solve(W, stepsize=0.1, steps=100, inner_steps=10, progress_bar=False, callback=sim)
 
@@ -149,7 +149,7 @@ def test_solve_restart(W, tmpdir):
     filename = tmpdir.join("testsim.hdf5")
     N = W.shape[-1]
 
-    sim = QuSimulation(filename, overwrite=True,  W=W)
+    sim = QuSimulation(filename, overwrite=True,  state=W)
 
     qf.simulation.solve(W.copy(), stepsize=0.1, steps=50, inner_steps=10, progress_bar=False, callback=sim)
 
@@ -158,7 +158,7 @@ def test_solve_restart(W, tmpdir):
     qf.simulation.solve(sim2['mat', -1], stepsize=0.1, steps=50, inner_steps=10, progress_bar=False, callback=sim)
 
     filename3 = tmpdir.join("testsim3.hdf5")
-    sim3 = QuSimulation(filename3, overwrite=True,  W=W)
+    sim3 = QuSimulation(filename3, overwrite=True,  state=W)
 
     qf.simulation.solve(W.copy(), stepsize=0.1, steps=100, inner_steps=10, progress_bar=False, callback=sim3)
 

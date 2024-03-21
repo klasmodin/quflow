@@ -33,13 +33,13 @@ def norm_L2(W):
     return np.linalg.norm(W, ord='fro')/sqN
 
 
-@njit(error_model='numpy', fastmath=True)
+# @njit(error_model='numpy', fastmath=True)
 def inner_L2(P, W):
-    sqN = np.sqrt(W.shape[-1])
-    return (P*W.T.conj()).sum()/sqN
+    N = W.shape[-1]
+    return (P*W.conj()).sum().real/N
 
 
-@njit(error_model='numpy', fastmath=True)
+# @njit(error_model='numpy', fastmath=True)
 def norm_Linf(W):
     """
     Spectral norm of `W`, corresponding to L-infinity.

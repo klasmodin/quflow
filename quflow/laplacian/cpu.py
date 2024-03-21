@@ -500,7 +500,8 @@ def laplace(P):
 
 
 def select_first(W):
-    return np.ascontiguousarray(W[*((0,)*(W.ndim-2)), :, :])
+    zeroind = (0,)*(W.ndim-2) + (Ellipsis,)
+    return np.ascontiguousarray(W[zeroind])
 
 
 def select_sum(W):

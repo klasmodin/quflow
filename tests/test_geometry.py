@@ -7,6 +7,10 @@ def get_random_omega_real(N=5):
     return np.random.randn(N**2)
 
 
+def get_random_omega_complex(N=5):
+    return np.random.randn(N**2) + 1j*np.random.randn(N**2)
+
+
 def get_random_mat(N=5):
     W = np.random.randn(N, N) + 1j*np.random.randn(N, N)
     W -= W.conj().T
@@ -23,6 +27,55 @@ def test_norm_L2(omega):
     norm_W = qf.geometry.norm_L2(W)
 
     np.testing.assert_allclose(norm_omega, norm_W)
+
+
+@pytest.mark.parametrize("N", [5, 17, 64])
+def test_inner_L2_real(N):
+    omega1 = get_random_omega_real(N)
+    omega2 = get_random_omega_real(N)
+
+    W1 = qf.shr2mat(omega1, N=N)
+    W2 = qf.shr2mat(omega2, N=N)
+
+    inner_omega = (omega1*omega2).sum()
+    inner_W = qf.geometry.inner_L2(W1, W2)
+
+    np.testing.assert_allclose(inner_omega, inner_W)
+
+
+
+@pytest.mark.parametrize("N", [17, 64])
+def test_inner_L2_complex(N):
+    omega1 = get_random_omega_complex(N)
+    omega2 = get_random_omega_complex(N)
+
+    W1 = qf.shc2mat(omega1, N=N)
+    W2 = qf.shc2mat(omega2, N=N)
+
+    inner_omega = (omega1*omega2.conj()).sum().real
+    inner_W = qf.geometry.inner_L2(W1, W2)
+
+    np.testing.assert_allclose(inner_omega, inner_W)
+
+
+@pytest.mark.parametrize("N", [17, 64])
+def test_inner_vs_norm_L2(N):
+    W = get_random_mat(N)
+
+    norm1 = qf.geometry.norm_L2(W)
+    norm2 = np.sqrt(qf.geometry.inner_L2(W,W))
+
+    np.testing.assert_allclose(norm1, norm2)
+
+
+@pytest.mark.parametrize("N", [17, 64])
+def test_norm_Linf(N):
+    W = get_random_mat(N)
+
+    norm1 = qf.geometry.norm_Linf(W)
+    norm2 = np.linalg.norm(W, ord=2)
+
+    np.testing.assert_allclose(norm1, norm2)
 
 
 @pytest.mark.parametrize("N", [15, 16, 64])

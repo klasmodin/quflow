@@ -20,7 +20,7 @@ from .utils import elm2ind, qtime2seconds, seconds2qtime
 
 _default_qutypes = {'mat': None, 'fun': np.float32}
 _default_qutype2varname = {'mat': 'mat', 'fun': 'fun', 'shr': 'shr', 'shc': 'shc'}
-
+_pickled_argnames = ['qutypes', 'hamiltonian', 'forcing', 'integrator']
 
 # ----------------------
 # QUSIMULATION CLASS DEF
@@ -62,7 +62,7 @@ class QuSimulation(object):
                  datapath: str = "/",
                  overwrite: bool = False,
                  loggers: dict = None,
-                 W: np.ndarray = None,
+                 state: np.ndarray = None,
                  time=None,
                  **kwargs):
         """
@@ -83,16 +83,15 @@ class QuSimulation(object):
         from . import __version__
 
         self.filename = filename
-        if datapath[-1] is not "/":
+        if datapath[-1] != "/":
             raise ValueError("Datapath must end with /")
         self.datapath = datapath
-        self.attrs = dict()
         self.fieldnames = dict()
         self.loggers = loggers if loggers is not None else dict()
 
         if not os.path.exists(filename) or overwrite:
-            if W is None:
-                raise ValueError("At least W must be provided to initialize a QuSimulation.")
+            if state is None:
+                raise ValueError("At least `state` must be provided to initialize a QuSimulation.")
 
             if qutypes is None:
                 self.qutypes = _default_qutypes
@@ -101,74 +100,99 @@ class QuSimulation(object):
 
             # Create or overwrite file
             with h5py.File(self.filename, "w") as f:
-                if self.datapath is not "/":
+                if self.datapath != "/":
                     f.create_group(self.datapath)
                 f[self.datapath].attrs["version"] = __version__
                 f[self.datapath].attrs["created"] = datetime.datetime.now().isoformat()
                 f[self.datapath].attrs["qutypes"] = np.array([pickle.dumps(self.qutypes)])
+                try:
+                    myp = pickle.dumps(self.loggers)
+                except AttributeError:
+                    pass
+                else:
+                    f[self.datapath].attrs['loggers'] = np.array([myp])
+                self.args_datapath = self.datapath + "args/"
+                f.create_group(self.args_datapath)
 
             # Add fields
-            self.initialize_field(W=W, time=time if time is not None else 0.0, **kwargs)
+            self.initialize_field(W=state, time=time if time is not None else 0.0, **kwargs)
 
         else:
             with h5py.File(self.filename, "r") as f:
                 if "prerun" in f[self.datapath].attrs:
                     exec(f[self.datapath].attrs["prerun"], globals())
                 self.qutypes = pickle.loads(f[self.datapath].attrs["qutypes"][0])
+                if "N" in f[self.datapath].attrs and state is not None:
+                    raise ValueError(self.filename + " has already been initialized with W.")
+                myp = f[self.datapath].attrs['loggers'][0]
+                self.loggers = pickle.loads(myp)
+                self.args_datapath = self.datapath + "args/"
                 if qutypes is not None:
                     raise ValueError(self.filename + " has already been initialized with qutypes.")
-                if "N" in f[self.datapath].attrs and W is not None:
-                    raise ValueError(self.filename + " has already been initialized with W.")
-
-
-        # Update attrs
-        with h5py.File(self.filename, "r") as f:
-            self.attrs.update(f[self.datapath].attrs)
-
+        
         # Update fieldnames
         self._update_fieldnames()
 
     def __setitem__(self, name, value):
         with h5py.File(self.filename, "r+") as f:
-            if name == "hamiltonian" or name == "forcing":
+            if name in _pickled_argnames:
                 try:
                     myp = pickle.dumps(value)
                 except AttributeError:
                     myp = value.__name__
-                    f[self.datapath].attrs[name] = myp
+                    f[self.args_datapath].attrs[name] = myp
                 else:
-                    f[self.datapath].attrs[name] = np.array([myp])
+                    f[self.args_datapath].attrs[name] = np.array([myp])
             elif name == "prerun":
                 prerun = "\n".join([l for l in value.strip().split("\n") if "In[" not in l])
                 f[self.datapath].attrs[name] = prerun
                 value = prerun
                 # exec(prerun, globals())
             else:
-                f[self.datapath].attrs[name] = value
-        self.attrs.update({name: value})
+                f[self.args_datapath].attrs[name] = value
 
     def __getitem__(self, name):
         ind = None
         if isinstance(name, tuple):
-            name, ind = name
+            if isinstance(name[0], str):
+                if len(name) > 2:
+                    ind = name[1:]
+                else:
+                    ind = name[1]
+                name = name[0]
+        if not isinstance(name, str):
+            # Assume it is an index
+            ind = name 
+            name = "mat"
         with h5py.File(self.filename, 'r') as f:
             if self.datapath + name in f:
                 if ind is not None:
                     value = f[self.datapath + name][ind]
                 else:
                     value = f[self.datapath + name][:]
-            elif name in f[self.datapath].attrs:
-                if name == "hamiltonian" or name == "forcing" or name == "qutypes":
-                    if isinstance(f[self.datapath].attrs[name], str):
-                        value = eval(f[self.datapath].attrs[name])
+            elif name in f[self.args_datapath].attrs:
+                if name in _pickled_argnames:
+                    if isinstance(f[self.args_datapath].attrs[name], str):
+                        value = eval(f[self.args_datapath].attrs[name])
                     else:
-                        myp = f[self.datapath].attrs[name][0]
+                        myp = f[self.args_datapath].attrs[name][0]
                         value = pickle.loads(myp)
+                else:
+                    value = f[self.args_datapath].attrs[name]
+            elif name in f[self.datapath].attrs:
+                if name == "qutypes":
+                    myp = f[self.datapath].attrs[name][0]
+                    value = pickle.loads(myp)
                 else:
                     value = f[self.datapath].attrs[name]
             else:
                 raise KeyError("There is no dataset or attribute '{}'.".format(name))
         return value
+    
+    def args(self):
+        with h5py.File(self.filename, 'r') as f:
+            for name in f[self.args_datapath].attrs:
+                yield name, self[name]
 
     def qutypes_iterator(self, W, qutype2varname=None):
         N = W.shape[-1]
@@ -227,7 +251,8 @@ class QuSimulation(object):
         with h5py.File(self.filename, 'r') as f:
             for name in f[self.datapath].keys():
                 dataset = f[self.datapath + name]
-                self.fieldnames.update({name: (dataset.shape, dataset.dtype)})
+                if isinstance(dataset, h5py.Dataset):
+                    self.fieldnames.update({name: (dataset.shape, dataset.dtype)})
 
     def initialize_field(self, W, time=0.0, **kwargs):
         try:
@@ -279,6 +304,11 @@ class QuSimulation(object):
                                           maxshape=(None,) + arr.shape
                                           )
                 varset[0, ...] = arr
+
+            # Add some default fields (this is temporary until a better integration class)
+            for name in ['tol', 'iterations', 'maxit']:
+                if name not in kwargs:
+                    kwargs[name] = 0.0
 
             # Create datasets for kwargs
             for name, value in kwargs.items():
@@ -349,7 +379,7 @@ class QuSimulation(object):
 def solve(W, stepsize=None, timestep=None,
           steps=None, simtime=None,
           inner_steps=None, inner_time=None,
-          integrator=isomp,
+          integrator=None,
           callback=None, callback_kwargs=None,
           progress_bar=True, progress_file=None, **kwargs):
     """
@@ -392,12 +422,57 @@ def solve(W, stepsize=None, timestep=None,
     **kwargs: dict
         Extra keyword arguments to send to integrator at each step.
     """
+
+    # Preprocess attributes from QuSimulation object
+    if isinstance(W, QuSimulation):
+        sim = W
+        W = sim['mat',-1]
+        if callback is None:
+            callback = sim
+        elif isinstance(callback, tuple):
+            callback += (sim,)
+        else:
+            callback = (callback, sim)
+        for name, value in sim.args():
+            if name == 'stepsize' and stepsize is None:
+                stepsize = value
+            elif name == 'timestep' and timestep is None:
+                timestep = value
+            elif name == 'steps' and steps is None:
+                steps = value
+            elif name == 'simtime' and simtime is None:
+                simtime = value
+            elif name == 'inner_steps' and inner_steps is None:
+                inner_steps = value
+            elif name == 'inner_time' and inner_time is None:
+                inner_time = value
+            elif name == 'integrator' and integrator is None:
+                integrator = value
+            elif name == 'callback_kwargs' and callback_kwargs is None:
+                callback_kwargs = value
+            elif name == 'progress_bar' and progress_bar is None:
+                progress_bar = value
+            elif name == 'progress_file' and progress_file is None:
+                progress_file = value
+            else:
+                # Add to kwargs
+                if name not in kwargs:
+                    kwargs[name] = value
+
+    # Size of state matrix
     N = W.shape[-1]
 
+    # Set default integrator if needed
+    if integrator is None:
+        integrator = isomp
+
     # Set default hamiltonian if needed
-    integrator_kwargs = {**kwargs}
+    integrator_kwargs = kwargs
     if 'hamiltonian' not in integrator_kwargs:
         integrator_kwargs['hamiltonian'] = solve_poisson
+    stats = None
+    if integrator is isomp:
+        integrator_kwargs['stats'] = {'iterations':0.0}
 
     # Determine steps
     if np.array([0 if x is None else 1 for x in [steps, simtime]]).sum() != 1:
@@ -425,8 +500,11 @@ def solve(W, stepsize=None, timestep=None,
     if progress_bar:
         try:
             if progress_file is None:
-                from tqdm.auto import tqdm
-                pbar = tqdm(total=steps, unit=' steps')
+                if 'verbatim' in integrator_kwargs and integrator_kwargs['verbatim']:
+                    progress_bar = False
+                else:
+                    from tqdm import tqdm
+                    pbar = tqdm(total=steps, unit=' steps')
             else:
                 from tqdm import tqdm
                 pbar = tqdm(total=steps, unit=' steps', file=progress_file, ascii=True, mininterval=10.0)
@@ -446,7 +524,7 @@ def solve(W, stepsize=None, timestep=None,
             pbar.update(no_steps)
         if callback is not None:
             for cfun in callback:
-                if 'stats' in integrator_kwargs and isinstance(integrator_kwargs['stats'], dict):
+                if 'stats' in integrator_kwargs:
                     callback_kwargs.update(integrator_kwargs['stats'])
                 cfun(W, delta_time=delta_time, delta_steps=no_steps, **callback_kwargs)
 
