@@ -313,38 +313,29 @@ def solve_cpu_skewh_(lap, W, P, buffer_float, buffer_complex):
     return P
 
 
-@njit(parallel=True)
-def solve_cpu_nonskewh_gpulike_(lap, W, P, buffer_float, buffer_complex):
+@njit(parallel=True, error_model='numpy', fastmath=True)
+def solve_cpu_generic_(lap, W, P, buffer_float, buffer_complex):
     """
-    Function for solving the quantized
-    Poisson equation (or more generally the equation defined by
-    the `lap` array). Uses NUMBA to accelerate the
-    Thomas algorithm for tridiagonal solver calculations.
 
     Parameters
     ----------
-    lap: ndarray(shape=(N, N, 2), dtype=float)
+    lap: ndarray(shape=(N**2, 2), dtype=float)
         Tridiagonal laplacian.
-    W: ndarray(shape=(N, N), dtype=complex)
+    W: ndarray(shape=(N**2,), dtype=complex)
         Input matrix.
-    P: ndarray(shape=(N, N), dtype=complex)
+    P: ndarray(shape=(N**2,), dtype=complex)
         Output matrix.
-    buffer_float: ndarray(shape=(N, N), dtype=float)
+    buffer_float: ndarray(shape=(N**2,), dtype=float)
         Float buffer.
-    buffer_complex: ndarray(shape=(N, N), dtype=complex)
+    buffer_complex: ndarray(shape=(N**2,), dtype=complex)
         Complex buffer.
     """
-    N = W.shape[0]
-
+    N = W.shape[-1]
     lap_flat = lap.reshape((N**2, 2))
     W_flat = W.ravel()
     P_flat = P.ravel()
     buffer_float_flat = buffer_float.ravel()
     buffer_complex_flat = buffer_complex.ravel()
-
-    # assert lap_flat.flags.c_contiguous
-    # assert W_flat.flags.c_contiguous
-    # assert P_flat.flags.c_contiguous
 
     # Set array stride. This should be the grid-stride on the GPU.
     stride = N + 1
@@ -363,49 +354,41 @@ def solve_cpu_nonskewh_gpulike_(lap, W, P, buffer_float, buffer_complex):
     #
     for m in prange(N+1):
 
-        # Initialize buffers
-        # i, j = mk2ij(m, 0)
-
         # First element: k = m
-        buffer_float_flat[m] = lap_flat[m, 0]
-        buffer_complex_flat[m] = W_flat[m]
+        val_float = lap_flat[m, 0]
+        val_complex = W_flat[m]
+        buffer_float_flat[m] = val_float
+        buffer_complex_flat[m] = val_complex
 
         # Forward sweep according to grid-stride
         for k in range(m + stride, N**2, stride):
-            # i, j = mk2ij(m, k)
-            # im, jm = i-1, j-1
-
-            w = lap_flat[k, 1]/buffer_float_flat[k-stride]
-            buffer_float_flat[k] = lap_flat[k, 0] - w*lap_flat[k, 1]
-            buffer_complex_flat[k] = W_flat[k] - w*buffer_complex_flat[k-stride]
+            w = lap_flat[k, 1]/val_float
+            val_float = lap_flat[k, 0] - w*lap_flat[k, 1]
+            val_complex = W_flat[k] - w*val_complex
+            buffer_float_flat[k] = val_float
+            buffer_complex_flat[k] = val_complex
             k_last = k
 
         # Backward sweep according to grid-stride
-        # i, j = mk2ij(m, N-m-1)
-        P_flat[k_last] = buffer_complex_flat[k_last]/buffer_float_flat[k_last]
+        val_complex = buffer_complex_flat[k_last]/buffer_float_flat[k_last]
+        val_float = lap_flat[k_last, 1]
+        P_flat[k_last] = val_complex
         for k in range(k_last - stride, -1, -stride):
-            # i, j = mk2ij(m, k)
-            # ip, jp = i+1, j+1
-            P_flat[k] = (buffer_complex_flat[k] - lap_flat[k+stride, 1]*P_flat[k+stride])/buffer_float_flat[k]
+            P_flat[k] = (buffer_complex_flat[k] - val_float*val_complex)/buffer_float_flat[k]
+            val_complex = P_flat[k]
+            val_float = lap_flat[k, 1]
 
     # Make sure the trace of P vanishes (corresponds to bc for laplacian)
-    # trP = P_flat[::N].sum()
-    # trP /= N
-    # P_flat[::N] -= trP
-
-    trP = P[0, 0]
-    for k in range(1, N):
-        trP += P[k, k]
+    trP = P_flat[::N+1].sum()
     trP /= N
-    for k in range(N):
-        P[k, k] -= trP
+    P_flat[::N+1] -= trP
 
     return P
 
 
 # Set default solver
-solve_cpu_ = solve_cpu_skewh_
-# solve_cpu_ = solve_cpu_nonskewh_gpulike_
+# solve_cpu_ = solve_cpu_skewh_
+solve_cpu_ = solve_cpu_generic_
 
 
 # ----------------------
