@@ -23,4 +23,4 @@ fi
 
 # echo "Running profiling, output in file ${filename}"
 
-python run_profiling.py "$@"
+python -u run_profiling.py "$@"

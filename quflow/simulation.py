@@ -21,6 +21,7 @@ from .utils import elm2ind, qtime2seconds, seconds2qtime
 _default_qutypes = {'mat': None, 'fun': np.float32}
 _default_qutype2varname = {'mat': 'mat', 'fun': 'fun', 'shr': 'shr', 'shc': 'shc'}
 _pickled_argnames = ['qutypes', 'hamiltonian', 'forcing', 'integrator']
+_info_args = ['info']
 
 # ----------------------
 # QUSIMULATION CLASS DEF
@@ -148,6 +149,8 @@ class QuSimulation(object):
                 f[self.datapath].attrs[name] = prerun
                 value = prerun
                 # exec(prerun, globals())
+            elif name in _info_args:
+                f[self.datapath].attrs[name] = value
             else:
                 f[self.args_datapath].attrs[name] = value
 

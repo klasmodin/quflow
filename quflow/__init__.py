@@ -11,5 +11,6 @@ from .analysis import scale_decomposition
 from . import integrators
 from . import geometry
 from . import dynamics
+from . import physics
 
 __version__ = '0.0.6'
