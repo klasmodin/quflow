@@ -590,7 +590,8 @@ def isomp_fixedpoint(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forc
     return W
 
 
-def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None,
+def isomp_fixedpoint2(W, stepsize, steps=100, hamiltonian=solve_poisson, 
+                      time=None, forcing=None,
                       tol='auto', maxit=10, minit=1, stats=None,
                       verbatim=False, compsum=False, reinitialize=False):
     """
@@ -606,11 +607,14 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
         Time step length.
     steps: int
         Number of steps to take.
-    hamiltonian: function
+    hamiltonian: function(W) or function(W, time)
         The Hamiltonian returning a stream matrix.
-    forcing: function(P, W) or None (default)
+    time: float or None (default)
+        Time at the initial state. If `None` the system is assumed to
+        be autonomous, and the time parameter is not passed to the hamiltonian and forcing.
+    forcing: function(P, W) or function(P, W, time) or None (default)
         Extra force function (to allow non-isospectral perturbations).
-    tol: float or 'auto'
+    tol: float or 'auto' (default)
         Tolerance for iterations. Negative value or "auto" means automatic choice.
     maxit: int
         Maximum number of iterations.
@@ -640,11 +644,17 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
     #     hamiltonian_accepts_out = True
     #     Phalf = np.zeros_like(W)
 
-    # Check if force function accepts 'out' argument
-    force_accepts_out = False
-    if forcing is not None and 'out' in inspect.getfullargspec(forcing).args:
-        force_accepts_out = True
-        FW = np.zeros_like(W)
+    # Check if force function is autonomous
+    if forcing is not None:
+        autonomous_force = True
+        if time is not None and 'time' in inspect.getfullargspec(forcing).args:
+            autonomous_force = False
+            FW = np.zeros_like(W)
+    
+    # Check if autonomous
+    autonomous = True
+    if time is not None and 'time' in inspect.getfullargspec(hamiltonian).args:
+        autonomous = False
 
     # Stats variables
     total_iterations = 0
@@ -702,7 +712,10 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
             np.copyto(dW_old, dW)
 
             # Update Ptilde
-            Phalf = hamiltonian(Whalf)
+            if autonomous:
+                Phalf = hamiltonian(Whalf)
+            else:
+                Phalf = hamiltonian(Whalf, time=time + hhalf)
             Phalf *= hhalf
 
             # Compute middle variables
@@ -725,10 +738,13 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
             # Add forcing if needed
             if forcing:
                 # Compute forcing if needed
-                if force_accepts_out:
-                    forcing(Phalf/hhalf, Whalf, out=FW)
-                else:
+                # if force_accepts_out:
+                #     forcing(Phalf/hhalf, Whalf, out=FW)
+                # else:
+                if autonomous_force:
                     FW = forcing(Phalf/hhalf, Whalf)
+                else:
+                    FW = forcing(Phalf/hhalf, Whalf, time=time + hhalf)
                 FW *= hhalf
                 dW += FW
 
@@ -794,7 +810,10 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
             # 4.
             np.copyto(W, t_compsum)
         else:
-            W += PWcomm
+            W += PWcomm        
+
+        if time:
+            time += stepsize
 
         # --- End of step ---
 
@@ -803,10 +822,6 @@ def isomp_fixedpoint2(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
     if stats:
         stats["iterations"] = total_iterations/steps
         stats["maxit"] = number_of_maxit/steps
-    # if integrals:
-    #     P = hamiltonian(W)
-    #     integrals["energy"] = (P*W).sum()
-    #     integrals["enstrophy"] = -(W**2).sum()
 
     return W
 
