@@ -5,12 +5,14 @@ import h5py
 import pickle
 import datetime
 import time
+import inspect
 from .quantization import mat2shc
 from .quantization import mat2shr
 from .transforms import shc2fun, shr2fun
 from .laplacian import solve_poisson
 from .integrators import isomp
 from .utils import elm2ind, qtime2seconds, seconds2qtime
+
 
 # from quflow import solve_poisson
 
@@ -473,8 +475,7 @@ def solve(W, stepsize=None, timestep=None,
     integrator_kwargs = kwargs
     if 'hamiltonian' not in integrator_kwargs:
         integrator_kwargs['hamiltonian'] = solve_poisson
-    stats = None
-    if integrator is isomp:
+    if 'stats' in inspect.getfullargspec(integrator).args:
         integrator_kwargs['stats'] = {'iterations':0.0}
 
     # Determine steps
