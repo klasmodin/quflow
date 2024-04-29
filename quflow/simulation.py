@@ -22,7 +22,7 @@ from .utils import elm2ind, qtime2seconds, seconds2qtime
 
 _default_qutypes = {'mat': None, 'fun': np.float32}
 _default_qutype2varname = {'mat': 'mat', 'fun': 'fun', 'shr': 'shr', 'shc': 'shc'}
-_pickled_argnames = ['qutypes', 'hamiltonian', 'forcing', 'integrator']
+_pickled_argnames = ['qutypes', 'hamiltonian', 'forcing', 'integrator', 'callback', 'integrator_callback']
 _info_args = ['info']
 
 # ----------------------
@@ -386,6 +386,7 @@ def solve(W, stepsize=None, timestep=None,
           inner_steps=None, inner_time=None,
           integrator=None,
           callback=None, callback_kwargs=None,
+          integrator_callback=None,
           progress_bar=True, progress_file=None, **kwargs):
     """
     High-level solve function.
@@ -420,6 +421,8 @@ def solve(W, stepsize=None, timestep=None,
         It is not evaluated at the initial time.
     callback_kwargs: dict
         Extra keyword arguments to send to callback at each output step.
+    integrator_callback: callable
+        Callback for integrator (called once per step).
     progress_bar: bool
         Show progress bar (default: True)
     progress_file: TextIOWrapper or None
@@ -453,6 +456,8 @@ def solve(W, stepsize=None, timestep=None,
                 inner_time = value
             elif name == 'integrator' and integrator is None:
                 integrator = value
+            elif (name == 'integrator_callback' or name == 'callback') and integrator_callback is None:
+                integrator_callback = value
             elif name == 'callback_kwargs' and callback_kwargs is None:
                 callback_kwargs = value
             elif name == 'progress_bar' and progress_bar is None:
@@ -477,6 +482,8 @@ def solve(W, stepsize=None, timestep=None,
         integrator_kwargs['hamiltonian'] = solve_poisson
     if 'stats' in inspect.getfullargspec(integrator).args:
         integrator_kwargs['stats'] = {'iterations':0.0}
+    if integrator_callback is not None:
+        integrator_kwargs['callback'] = integrator_callback
 
     # Determine steps
     if np.array([0 if x is None else 1 for x in [steps, simtime]]).sum() != 1:
