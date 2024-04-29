@@ -18,7 +18,7 @@ def solve_mhd(state):
     return P, B
 
 
-def magmp_fixedpoint(W, 
+def magmp_fixedpoint(state, 
                      stepsize, 
                      steps=100, 
                      hamiltonian=solve_mhd, 
@@ -40,8 +40,9 @@ def magmp_fixedpoint(W,
 
     Parameters
     ----------
-    W: ndarray
-        Initial skew-Hermitian vorticity matrix (overwritten and returned).
+    state: ndarray, shape = (2,N,N)
+        Initial state given as the skew-Hermitian vorticity 
+        matrices W = state[0,:,:] and Theta = state[1,:,:].
     stepsize: float
         Time step length.
     steps: int
@@ -86,7 +87,7 @@ def magmp_fixedpoint(W,
         autonomous_force = True
         if time is not None and 'time' in inspect.getfullargspec(forcing).args:
             autonomous_force = False
-            FW = np.zeros_like(W)
+            FW = np.zeros_like(state)
     
     # Check if autonomous
     autonomous = True
@@ -98,23 +99,23 @@ def magmp_fixedpoint(W,
     number_of_maxit = 0
 
     # Initialize
-    dW = np.zeros_like(W)
-    dW_old = np.zeros_like(W)
-    Whalf = np.zeros_like(W)
-    PWcomm = np.zeros_like(W)
-    BThetacomm = np.zeros_like(W[0,:,:])
+    dstate = np.zeros_like(state)
+    dstate_old = np.zeros_like(state)
+    statehalf = np.zeros_like(state)
+    Pstatecomm = np.zeros_like(state)
+    BThetacomm = np.zeros_like(state[0,:,:])
     BThetaPhalf = np.zeros_like(BThetacomm)
     # PWPhalf = np.zeros_like(W)
     hhalf = stepsize/2.0
 
     # Specify tolerance if needed
     if tol == "auto" or tol < 0:
-        mach_eps = np.finfo(W.dtype).eps
-        if W.ndim > 2:
-            zeroind = (0,)*(W.ndim-2) + (Ellipsis,)
-            tol = np.sqrt(mach_eps)*stepsize*np.linalg.norm(W[zeroind], np.inf)
+        mach_eps = np.finfo(state.dtype).eps
+        if state.ndim > 2:
+            zeroind = (0,)*(state.ndim-2) + (Ellipsis,)
+            tol = np.sqrt(mach_eps)*stepsize*np.linalg.norm(state[zeroind], np.inf)
         else:
-            tol = np.sqrt(mach_eps)*stepsize*np.linalg.norm(W, np.inf)
+            tol = np.sqrt(mach_eps)*stepsize*np.linalg.norm(state, np.inf)
         if verbatim:
             print("Tolerance set to {}.".format(tol))
         if stats:
@@ -126,7 +127,7 @@ def magmp_fixedpoint(W,
         # Per step updates
         resnorm = np.inf
         if reinitialize:
-            dW.fill(0.0)
+            dstate.fill(0.0)
 
         # --- Beginning of iterations ---
         for i in range(maxit):
@@ -135,61 +136,61 @@ def magmp_fixedpoint(W,
             total_iterations += 1
 
             # Compute Wtilde
-            np.copyto(Whalf, W)
-            Whalf += dW
-            Thetahalf = Whalf[1,:,:]
+            np.copyto(statehalf, state)
+            statehalf += dstate
+            Thetahalf = statehalf[1,:,:]
 
             # Save dW from previous step
-            np.copyto(dW_old, dW)
+            np.copyto(dstate_old, dstate)
 
             # Update Ptilde
             if autonomous:
-                Phalf, Bhalf = hamiltonian(Whalf)
+                Phalf, Bhalf = hamiltonian(statehalf)
             else:
-                Phalf, Bhalf = hamiltonian(Whalf, time=time + hhalf)
+                Phalf, Bhalf = hamiltonian(statehalf, time=time + hhalf)
             Phalf *= hhalf
             Bhalf *= hhalf
 
             # Compute middle variables
             # PWcomm = Phalf @ Whalf  # old
-            np.matmul(Phalf, Whalf, out=PWcomm)
+            np.matmul(Phalf, statehalf, out=Pstatecomm)
             np.matmul(Bhalf, Thetahalf, out=BThetacomm)
 
             # PWPhalf = PWcomm @ Phalf  # old
             # np.matmul(PWcomm, Phalf, out=PWPhalf)
-            np.matmul(PWcomm, Phalf, out=dW)  # More efficient, as PWPhalf is not needed
-            conj_subtract_(PWcomm, PWcomm)
+            np.matmul(Pstatecomm, Phalf, out=dstate)  # More efficient, as PWPhalf is not needed
+            conj_subtract_(Pstatecomm, Pstatecomm)
             np.matmul(BThetacomm, Phalf, out=BThetaPhalf)
             conj_subtract_(BThetacomm, BThetacomm)
 
             # Update dW
-            dW += PWcomm
-            dW[0,:,:] += BThetaPhalf
-            dW[0,:,:] -= BThetaPhalf.T.conj()
-            dW[0,:,:] += BThetacomm
+            dstate += Pstatecomm
+            dstate[0,:,:] += BThetaPhalf
+            dstate[0,:,:] -= BThetaPhalf.T.conj()
+            dstate[0,:,:] += BThetacomm
 
             # Add forcing if needed
             if forcing:
                 if autonomous_force:
-                    FW = forcing(Phalf/hhalf, Whalf)
+                    FW = forcing(Phalf/hhalf, statehalf)
                 else:
-                    FW = forcing(Phalf/hhalf, Whalf, time=time + hhalf)
+                    FW = forcing(Phalf/hhalf, statehalf, time=time + hhalf)
                 FW *= hhalf
-                dW += FW
+                dstate += FW
 
             # Check if time to break
             if i+1 >= minit:
                 # Compute error
                 resnorm_old = resnorm
-                dW_old -= dW
-                if dW_old.ndim > 2:
-                    resnormvec = scipy.linalg.norm(dW_old, ord=np.inf, axis=(-1, -2))
+                dstate_old -= dstate
+                if dstate_old.ndim > 2:
+                    resnormvec = scipy.linalg.norm(dstate_old, ord=np.inf, axis=(-1, -2))
                     if Phalf.ndim == 2:
                         resnorm = resnormvec[0]
                     else:
                         resnorm = resnormvec.max()
                 else:
-                    resnorm = scipy.linalg.norm(dW_old, ord=np.inf)
+                    resnorm = scipy.linalg.norm(dstate_old, ord=np.inf)
                 if resnorm <= tol or resnorm >= resnorm_old:
                     break
 
@@ -202,16 +203,16 @@ def magmp_fixedpoint(W,
             #     stats['maxit_reached'] = True
 
         # Rescale commutators (as they are divided by 2)
-        PWcomm *= 2
+        Pstatecomm *= 2
         BThetacomm *= 2
 
         # Evaluate callback function
         if callback is not None:
-            callback(W, PWcomm)
+            callback(state, Pstatecomm)
 
         # Update state
-        W += PWcomm
-        W[0,:,:] += BThetacomm     
+        state += Pstatecomm
+        state[0,:,:] += BThetacomm     
 
         if time:
             time += stepsize
@@ -224,7 +225,7 @@ def magmp_fixedpoint(W,
         stats["iterations"] = total_iterations/steps
         stats["maxit"] = number_of_maxit/steps
 
-    return W
+    return state
 
 
 # Default magnetic integrator
