@@ -546,7 +546,7 @@ def plot2(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fa
 
 def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_args=None,
                       codec='h264', title='QUFLOW animation',
-                      progress_bar=True, progress_file=None, time=None, data2fun=as_fun, **kwargs):
+                      progress_bar=True, progress_file=None, time=None, adaptive_scale=False, data2fun=as_fun, **kwargs):
     """
     Parameters
     ----------
@@ -612,6 +612,12 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
             ax = im.axes
             textstr = "time: {}".format(time[0])
             timetag = ax.text(0.05, 0.95, textstr, transform=ax.transAxes, verticalalignment='top')
+        
+        if adaptive_scale:
+            ax = im.axes
+            textstr = "max: {}".format(0)
+            maxtag = ax.text(0.02, 0.02, textstr, transform=ax.transAxes, verticalalignment='bottom')
+
 
         with writer.saving(im.figure, filename, dpi=100):
 
@@ -637,6 +643,10 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
                     im.set_array(fun.ravel())
                 else:
                     raise NotImplementedError("Could not find method for setting data.")
+                if adaptive_scale:
+                    minmax = np.abs(fun).max()
+                    im.set_clim(vmin=-minmax, vmax=minmax)
+                    maxtag.set_text("max: {:.2f}".format(minmax))
                 if time is not None:
                     textstr = "time: {:.2f}".format(time[k])
                     timetag.set_text(textstr)
