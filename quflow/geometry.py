@@ -136,3 +136,17 @@ def cartesian_generators(N, dtype=np.complex128):
     S1, S2, S3 = so3_generators(N=N, dtype=dtype)
 
     return h*S1, h*S2, h*S3
+
+
+def grad(P):
+    """
+    Return matrices dP1, dP2, dP3 corresponding to the Cartesian gradient of P.
+    """
+    # This is a VERY inefficient way to compute the gradient.
+    # An optimized version should be implemented.
+    X = cartesian_generators(P.shape[-1], P.dtype)
+    dP = np.zeros((3,)+P.shape, dtype=P.dtype)
+    for Xi, dPi in zip(X, dP):
+        dPi[...] = bracket(Xi, P)
+    return dP
+
