@@ -644,7 +644,11 @@ def create_animation2(filename, states, N=None, fps=25, preset='medium', extra_a
                 else:
                     raise NotImplementedError("Could not find method for setting data.")
                 if adaptive_scale:
-                    minmax = np.abs(fun).max()
+                    try:
+                        minmax = np.max([minmaxold, np.abs(fun).max()])
+                    except:
+                        minmax = np.abs(fun).max()
+                        minmaxold = minmax
                     im.set_clim(vmin=-minmax, vmax=minmax)
                     maxtag.set_text("max: {:.2f}".format(minmax))
                 if time is not None:
