@@ -1,5 +1,7 @@
 import numpy as np
 from numba import njit, prange
+import scipy.sparse as sp
+from scipy.sparse import isspmatrix_dia
 
 # ----------------
 # GLOBAL VARIABLES
@@ -387,8 +389,110 @@ def solve_cpu_generic_(lap, W, P, buffer_float, buffer_complex):
 
 
 # Set default solver
-# solve_cpu_ = solve_cpu_skewh_
-solve_cpu_ = solve_cpu_generic_
+solve_cpu_ = solve_cpu_skewh_
+# solve_cpu_ = solve_cpu_generic_
+
+
+@njit(error_model='numpy', fastmath=True)
+def dot_cpu_m_diag_(lap, P_m_diag, W_m_diag,):
+    """
+    Dot product for tridiagonal operator applied to m diagonal.
+
+    Parameters
+    ----------
+    lap: ndarray(shape(N, N, 2), dtype=float)
+        Tridiagonal operator (typically laplacian).
+    P_m_diag: ndarray(shape=(N-m,), dtype=complex)
+        Input diagonal.
+    W_m_diag: ndarray(shape=(N-m,), dtype=complex)
+        Output diagonal.
+    """
+    N = lap.shape[-2]
+    m = N - W_m_diag.shape[-1]
+    absm = np.abs(m)
+
+    if N-absm == 1:
+        i, j = mk2ij(m, 0)
+        W_m_diag[0] = lap[i, j, 0]*P_m_diag[0]
+    else:
+        i, j = mk2ij(m, 0)
+        W_m_diag[0] = lap[i, j, 0]*P_m_diag[0] + lap[i+1, j+1, 1]*P_m_diag[1]
+        for k in range(1, N-absm-1):
+            i, j = mk2ij(m, k)
+            W_m_diag[k] = lap[i, j, 0]*P_m_diag[k] + lap[i+1, j+1, 1]*P_m_diag[k+1] + lap[i, j, 1]*P_m_diag[k-1]
+        k = N-absm-1
+        i, j = mk2ij(m, k)
+        W_m_diag[k] = lap[i, j, 0]*P_m_diag[k] + lap[i, j, 1]*P_m_diag[k-1]
+
+    return W_m_diag
+
+
+@njit(error_model='numpy', fastmath=True)
+def solve_cpu_m_diag_(lap, W_m_diag, P_m_diag):
+    """
+    Solve Poisson equation for only m diagonal.
+
+    Parameters
+    ----------
+    lap: ndarray(shape=(N**2, 2), dtype=float)
+        Tridiagonal laplacian.
+    W_m_diag: ndarray(shape=(N-m,), dtype=complex)
+        Input diagonal.
+    P_m_diag: ndarray(shape=(N-m,), dtype=complex)
+        Output diagonal.
+    buffer_float: ndarray(shape=(N**2,), dtype=float)
+        Float buffer.
+    buffer_complex: ndarray(shape=(N**2,), dtype=complex)
+        Complex buffer.
+    """
+    N = lap.shape[-2]
+    m = N - W_m_diag.shape[-1]
+    absm = np.abs(m)
+    # buffer_float_flat = buffer_float.ravel()
+    buffer_float_flat = np.zeros(N-absm, dtype=lap.dtype)
+    # buffer_complex_flat = buffer_complex.ravel()
+    buffer_complex_flat = np.zeros(N-absm, dtype=W_m_diag.dtype)
+
+    # Initialize buffers
+    i, j = mk2ij(m, 0)
+    # buffer_float[i, j] = lap[i, j, 0]
+    buffer_float_flat[0] = lap[i, j, 0]
+    # buffer_complex[i, j] = W_m_diag[0]
+    buffer_complex_flat[0] = W_m_diag[0]
+
+    # Forward sweep
+    for k in range(1, N-absm):
+        i, j = mk2ij(m, k)
+        # im, jm = i-1, j-1
+
+        # w = lap[i, j, 1]/buffer_float[im, jm]
+        w = lap[i, j, 1]/buffer_float_flat[k-1]
+        # buffer_float[i, j] = lap[i, j, 0] - w*lap[i, j, 1]
+        buffer_float_flat[k] = lap[i, j, 0] - w*lap[i, j, 1]
+        # buffer_complex[i, j] = W[i, j] - w*buffer_complex[im, jm]
+        buffer_complex_flat[k] = W_m_diag[k] - w*buffer_complex_flat[k-1]
+
+    # Backward sweep
+    i, j = mk2ij(m, N-absm-1)
+    # P[i, j] = buffer_complex[i, j]/buffer_float[i, j]
+    k = N-absm-1
+    P_m_diag[k] = buffer_complex_flat[k]/buffer_float_flat[k]
+    for k in range(N-absm-2, -1, -1):
+        i, j = mk2ij(m, k)
+        ip, jp = i+1, j+1
+        # P[i, j] = (buffer_complex[i, j] - lap[ip, jp, 1]*P[ip, jp])/buffer_float[i, j]
+        P_m_diag[k] = (buffer_complex_flat[k] - lap[ip, jp, 1]*P_m_diag[k+1])/buffer_float_flat[k]
+
+    if m == 0:
+        # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+        trP = P_m_diag[0]
+        for k in range(1, N):
+            trP += P_m_diag[k]
+        trP /= N
+        for k in range(N):
+            P_m_diag[k] -= trP
+
+    return P_m_diag
 
 
 # ----------------------
@@ -473,11 +577,22 @@ def laplace(P):
     W: ndarray(shape=(N, N), dtype=complex)
     """
     N = P.shape[-1]
-    lap = laplacian(N, dtype=type(P[0, 0].real))
 
     # Apply dot product
-    W = np.zeros_like(P)
-    dot_cpu_(lap, P, W)
+    if isspmatrix_dia(P):
+        # Sparse diamatrix
+        lap = laplacian(N, dtype=np.float32 if P.dtype == np.complex64 else np.float64)
+        W = P.copy()
+        for P_diag_m, W_diag_m, m in zip(P.data, W.data, P.offsets):
+            if m < 0:
+                dot_cpu_m_diag_(lap, P_diag_m[:N+m], W_diag_m[:N+m])
+            else:
+                dot_cpu_m_diag_(lap, P_diag_m[m:], W_diag_m[m:])
+    else:
+        # Full matrix
+        lap = laplacian(N, dtype=type(P[0, 0].real))
+        W = np.zeros_like(P)
+        dot_cpu_(lap, P, W)
 
     return W
 
@@ -508,19 +623,29 @@ def solve_poisson(W, reduce=select_first):
         W = reduce(W)
     W_shape = W.shape
     N = W_shape[-1]
-    lap = laplacian(N, bc=True, dtype=type(W[0, 0].real))
+    
 
     # if N not in _cpu_buffer_cache or W.dtype != _cpu_buffer_cache[N]['complex'].dtype:
     #     allocate_buffer(W)
 
-    # P = _cpu_buffer_cache[N]['P']
-    P = _get_cache(W_shape, W.dtype)
-    solve_cpu_(lap, W, P,
-               # _cpu_buffer_cache[N]['float'],
-               _get_cache(W_shape, W.dtype, "real"),
-               # _cpu_buffer_cache[N]['complex']
-               _get_cache(W_shape, W.dtype, "complex"),
-            )
+    if isspmatrix_dia(W):
+        # Sparse diamatrix
+        lap = laplacian(N, bc=True, dtype=np.float32 if W.dtype == np.complex64 else np.float64)
+        P = W.copy()
+        for W_diag_m, P_diag_m, m in zip(W.data, P.data, W.offsets):
+            if m < 0:
+                solve_cpu_m_diag_(lap, W_diag_m[:N+m], P_diag_m[:N+m])
+            else:
+                solve_cpu_m_diag_(lap, W_diag_m[m:], P_diag_m[m:])
+    else:
+        lap = laplacian(N, bc=True, dtype=type(W[0, 0].real))
+        P = _get_cache(W_shape, W.dtype)
+        solve_cpu_(lap, W, P,
+                # _cpu_buffer_cache[N]['float'],
+                _get_cache(W_shape, W.dtype, "real"),
+                # _cpu_buffer_cache[N]['complex']
+                _get_cache(W_shape, W.dtype, "complex"),
+                )
 
     return P
 

@@ -3,7 +3,7 @@ import scipy.linalg
 import inspect
 
 from ..laplacian import solve_poisson, laplace
-from ..geometry import norm_Linf
+from ..geometry import norm_Linf, hbar
 from .isospectral import commutator, conj_subtract_
 from .isospectral import _SKEW_HERM_
 
@@ -107,6 +107,7 @@ def magmp_fixedpoint(state,
     BThetaPhalf = np.zeros_like(BThetacomm)
     # PWPhalf = np.zeros_like(W)
     hhalf = stepsize/2.0
+    hb = hbar(N=state.shape[-1])
 
     # Specify tolerance if needed
     if tol == "auto" or tol < 0:
@@ -170,12 +171,12 @@ def magmp_fixedpoint(state,
             dstate[0,:,:] += BThetacomm
 
             # Add forcing if needed
-            if forcing:
+            if forcing is not None:
                 if autonomous_force:
                     FW = forcing(Phalf/hhalf, statehalf)
                 else:
                     FW = forcing(Phalf/hhalf, statehalf, time=time + hhalf)
-                FW *= hhalf
+                FW *= hhalf*hb
                 dstate += FW
 
             # Check if time to break
@@ -212,7 +213,10 @@ def magmp_fixedpoint(state,
 
         # Update state
         state += Pstatecomm
-        state[0,:,:] += BThetacomm     
+        state[0,:,:] += BThetacomm   
+        if forcing is not None:
+            FW *= 2
+            state += FW
 
         if time:
             time += stepsize

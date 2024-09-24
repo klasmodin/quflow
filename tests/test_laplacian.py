@@ -6,6 +6,7 @@ import quflow.laplacian.tridiagonal as qutridiagonal
 import quflow.laplacian.direct as qudirect
 import quflow.laplacian.cpu as qucpu
 import quflow.laplacian.gpu as qugpu
+from scipy.sparse import dia_matrix
 
 
 def get_random_omega_real(N=5):
@@ -104,7 +105,7 @@ def get_smooth_mat(N=5):
     return qf.shr2mat(omegar, N=N)
 
 
-@pytest.mark.parametrize("N", [33, 65, 128])
+@pytest.mark.parametrize("N", [2, 33, 65, 128])
 @pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu, qusparse, qutridiagonal])
 @pytest.mark.parametrize("skewh", [True, False])
 def test_laplace(N, qulap, skewh):
@@ -125,6 +126,62 @@ def test_laplace(N, qulap, skewh):
     np.testing.assert_allclose(W, Wexact)
 
 
+@pytest.mark.parametrize("m", [0, 9, 22])
+@pytest.mark.parametrize("N", [33, 65, 128])
+def test_laplace_diamat(N, m):
+
+    Pexact, Wexact = get_random_poisson_solution(N=N, skewh=True, seed=N)
+
+    if m == 0:
+        dataP = np.diagonal(Pexact, 0)
+        Pm = dia_matrix((dataP, 0), shape=(N, N))
+    else:
+        dataP = np.zeros((2,N), dtype=np.complex128)
+        dataP[0,:N-m] = np.diagonal(Pexact, -m)
+        dataP[1,m:] = np.diagonal(Pexact, m)
+        Pm = dia_matrix((dataP, np.array([-m, m])), shape=(N, N))
+    Wm = qucpu.laplace(Pm)
+
+    dataW = np.zeros((2,N), dtype=np.complex128)
+    dataW[0,:N-m] = np.diagonal(Wexact, -m)
+    dataW[1,m:] = np.diagonal(Wexact, m)
+    if m == 0:
+        Wm_ref = dia_matrix((dataW[0,:], 0), shape=(N, N))
+    else:
+        Wm_ref = dia_matrix((dataW, np.array([-m, m])), shape=(N, N))
+
+    np.testing.assert_allclose(Wm.toarray(), Wm_ref.toarray())
+
+
+@pytest.mark.parametrize("m", [0, 9, 22])
+@pytest.mark.parametrize("N", [33, 65, 128])
+def test_solve_poisson_diamat(N, m):
+
+    Pexact, Wexact = get_random_poisson_solution(N=N, skewh=True, seed=N)
+
+    if m == 0:
+        dataP = np.diagonal(Pexact, 0)
+        Pm = dia_matrix((dataP, 0), shape=(N, N))
+        dataW = np.diagonal(Wexact, 0)
+        Wm = dia_matrix((dataW, 0), shape=(N, N))
+    else:
+        dataP = np.zeros((2,N), dtype=np.complex128)
+        dataP[0,:N-m] = np.diagonal(Pexact, -m)
+        dataP[1,m:] = np.diagonal(Pexact, m)
+        Pm = dia_matrix((dataP, np.array([-m, m])), shape=(N, N))
+
+        dataW = np.zeros((2,N), dtype=np.complex128)
+        dataW[0,:N-m] = np.diagonal(Wexact, -m)
+        dataW[1,m:] = np.diagonal(Wexact, m)
+        Wm = dia_matrix((dataW, np.array([-m, m])), shape=(N, N))
+
+    Pm_new = qucpu.solve_poisson(Wm)
+
+    np.testing.assert_allclose(Pm_new.toarray(), Pm.toarray())
+
+
+
+
 @pytest.mark.parametrize("N", [33, 64, 101])
 def test_solve_poisson_multistate(N):
     W0 = get_smooth_mat(N)
@@ -140,7 +197,7 @@ def test_solve_poisson_multistate(N):
     np.testing.assert_allclose(Plarge, P0)
 
 
-@pytest.mark.parametrize("N", [33, 64, 101])
+@pytest.mark.parametrize("N", [2, 33, 64, 101])
 @pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu, qusparse, qutridiagonal])
 @pytest.mark.parametrize("skewh", [True, False])
 def test_solve_poisson(N, qulap, skewh):

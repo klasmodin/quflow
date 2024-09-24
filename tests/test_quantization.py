@@ -52,3 +52,55 @@ def test_mat2shr_(W):
 
     np.testing.assert_allclose(omega, omega2)
     # assert omega == pytest.approx(omega2)
+
+
+@pytest.mark.parametrize("m", [0, -4, 4, -9, 9])
+@pytest.mark.parametrize("el", [9, 15])
+@pytest.mark.parametrize("N", [16, 19, 63])
+def test_elmr2mat(el, m, N):
+    
+    i = qf.elm2ind(el, m)
+    omegar = np.zeros(N**2, dtype=np.float64)
+    omegar[i] = 1.0
+
+    Tref = qf.shr2mat(omegar, N=N)
+
+    T = qf.elmr2mat(el, m, N)
+    
+    np.testing.assert_allclose(T.toarray(), Tref)
+
+
+@pytest.mark.parametrize("m", [0, -4, 4, -9, 9])
+@pytest.mark.parametrize("el", [6, 15])
+@pytest.mark.parametrize("N", [16, 19])
+def test_elmr2mat_norm(el, m, N):
+    
+    T = qf.elmr2mat(el, m, N)
+    
+    np.testing.assert_allclose(qf.geometry.norm_L2(T.toarray()), 1.0)
+
+
+@pytest.mark.parametrize("m", [0, -4, 4, -9, 9])
+@pytest.mark.parametrize("el", [9, 15])
+@pytest.mark.parametrize("N", [16, 19, 63])
+def test_elmc2mat(el, m, N):
+    
+    i = qf.elm2ind(el, m)
+    omegac = np.zeros(N**2, dtype=np.complex128)
+    omegac[i] = 1.0
+
+    Tref = qf.shc2mat(omegac, N=N)
+
+    T = qf.elmc2mat(el, m, N)
+    
+    np.testing.assert_allclose(T.toarray(), Tref)
+
+
+@pytest.mark.parametrize("m", [0, -4, 4, -9, 9])
+@pytest.mark.parametrize("el", [6, 15])
+@pytest.mark.parametrize("N", [16, 19])
+def test_elmc2mat_norm(el, m, N):
+    
+    T = qf.elmc2mat(el, m, N)
+    
+    np.testing.assert_allclose(qf.geometry.norm_L2(T.toarray()), 1.0)

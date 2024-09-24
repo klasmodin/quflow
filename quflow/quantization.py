@@ -5,6 +5,7 @@ from numba import njit
 import os
 from scipy.linalg import eigh_tridiagonal
 from .io import save_basis, load_basis
+from scipy.sparse import dia_matrix
 
 # ----------------
 # GLOBAL VARIABLES
@@ -384,3 +385,86 @@ def mat2shc(W):
     mat2shc_(W, basis, omega)
 
     return omega
+
+
+def elmr2mat(el, m, N):
+    """
+    Return real T_elm matrix in the sparse format `diamatrix`.
+    This gives a basis of u(N).
+    The matrix is normalized with respect to `geometry.normL2`.
+
+    Parameters
+    ----------
+    el: int
+    m: int
+    N: int
+
+    Returns
+    -------
+    T_elm: diamatrix, shape (N, N)
+    """
+    basis = get_basis(N=N)
+    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
+
+    absm = np.abs(m)
+
+    bind0 = basis_break_indices[absm]
+    bind1 = basis_break_indices[absm+1]
+    basis_m_mat = basis[bind0:bind1].reshape((N-absm, N-absm)).astype(np.complex128)
+
+    if m == 0:  # Diagonal
+        diag = 1.0j*basis_m_mat[:, el]
+        T_elm = dia_matrix((diag, 0), shape=(N, N))
+    else:
+        # Lower diagonal
+        sgn = 1 if m % 2 == 0 else -1
+        diag_m = basis_m_mat[:, el-absm]
+        diag_m *= sgn if m < 0 else 1.0j*sgn
+        diag_m /= np.sqrt(2)
+
+        data = np.zeros((2, N), dtype=diag_m.dtype)
+        data[0,:N-absm] = -diag_m.conj()
+        data[1,absm:] = diag_m
+
+        T_elm = dia_matrix((data, np.array([-absm, absm])), shape=(N, N))
+
+    return T_elm
+
+
+def elmc2mat(el, m, N):
+    """
+    Return complex T_elm matrix in the sparse format `diamatrix`.
+    This gives a basis of gl(N, C).
+    The matrix is normalized with respect to `geometry.normL2`.
+
+    Parameters
+    ----------
+    el: int
+    m: int
+    N: int
+
+    Returns
+    -------
+    T_elm: diamatrix, shape (N, N)
+    """
+    basis = get_basis(N=N)
+    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
+
+    absm = np.abs(m)
+
+    bind0 = basis_break_indices[absm]
+    bind1 = basis_break_indices[absm+1]
+    basis_m_mat = basis[bind0:bind1].reshape((N-absm, N-absm)).astype(np.complex128)
+
+    data = np.zeros(N, dtype=basis_m_mat.dtype)
+    if m >= 0:
+        data[:N-absm] = basis_m_mat[:, el-absm]
+    else:
+        data[absm:] = basis_m_mat[:, el-absm]
+    data *= 1.0j if m % 2 == 0 or m >= 0 else -1.0j
+    
+    T_elm = dia_matrix((data, -m), shape=(N, N))
+
+    return T_elm

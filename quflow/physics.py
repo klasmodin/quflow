@@ -4,6 +4,23 @@ from .laplacian import solve_poisson, laplace
 from .geometry import norm_Linf, norm_L2, inner_L2
 from .integrators import commutator
 
+# Define inner products
+
+def inner_Hm1(W1, W2):
+    P2 = solve_poisson(W2)
+    return -inner_L2(W1, P2)
+
+def norm_Hm1(W):
+    return np.sqrt(inner_Hm1(W, W))
+
+def inner_H1(P1, P2):
+    W2 = laplace(P2)
+    return -inner_L2(P1, W2)
+
+def norm_H1(P):
+    return np.sqrt(inner_H1(P, P))
+
+
 # Define common functions (e.g. used as loggers)
 
 def energy_euler(W):
@@ -12,13 +29,13 @@ def energy_euler(W):
     for the 2-D Euler equations.
     """
     P = solve_poisson(W)
-    return -inner_L2(W, P)
+    return -inner_L2(W, P)/2.0
 
 def enstrophy(W):
     """
     Enstrophy of the vorticity matrix `W`.
     """
-    return inner_L2(W, W)
+    return inner_L2(W, W)/2.0
 
 
 def sectional_curvature(F, G):

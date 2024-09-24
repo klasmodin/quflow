@@ -1,6 +1,7 @@
 import numpy as np
 from numba import njit
 from scipy.linalg import expm
+from scipy.sparse import isspmatrix_dia
 
 
 @njit(error_model='numpy', fastmath=True)
