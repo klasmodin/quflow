@@ -1,7 +1,7 @@
 import numpy as np
 from .utils import elm2ind
 from .laplacian.direct import compute_direct_laplacian
-from numba import njit
+from numba import njit, prange
 import os
 from scipy.linalg import eigh_tridiagonal
 from .io import save_basis, load_basis
@@ -19,7 +19,27 @@ _basis_cache = dict()
 # LOWER LEVEL FUNCTIONS
 # ---------------------
 
-@njit
+@njit(error_model='numpy', fastmath=True)
+def basis_break_index(absm, N):
+    """
+    Computes the m break indices for the basis.
+
+    Parameters
+    ----------
+    n: int or np.array of int
+    N: int
+
+    Returns
+    -------
+    int or np.array of int
+    """
+    absm -= 1
+    ind = absm + 2*absm**2 - 6*absm*N + 6*N**2
+    ind *= 1 + absm
+    return ind // 6
+
+
+@njit(error_model='numpy', fastmath=True)
 def adjust_basis_orientation_(w2, m, tol=1e-16):
     """
     Adjust (inline) the sign of the eigenbasis `w2` so that it corresponds
@@ -43,7 +63,7 @@ def adjust_basis_orientation_(w2, m, tol=1e-16):
             w2[:, i] *= (-1 if m % 2 == 1 else 1)
 
 
-def compute_basis(N):
+def compute_basis(N, dtype=np.float64):
     """
     Compute quantization basis.
 
@@ -56,15 +76,14 @@ def compute_basis(N):
     basis: ndarray
     """
 
-    basis_break_indices = np.hstack((0, (np.arange(N, 0, -1)**2).cumsum()))
-    basis = np.zeros(basis_break_indices[-1], dtype=float)
+    # basis_break_indices = np.hstack((0, (np.arange(N, 0, -1)**2).cumsum()))
+    # basis = np.zeros(basis_break_indices[-1], dtype=float)
+    basis = np.zeros(basis_break_index(N, N), dtype=dtype)
 
     # Compute direct laplacian
-    lap = compute_direct_laplacian(N, bc=False)
+    lap = compute_direct_laplacian(N, bc=False, dtype=dtype)
 
     for m in range(N):
-        bind0 = basis_break_indices[m]
-        bind1 = basis_break_indices[m+1]
 
         # Compute eigen decomposition
         n = N - m
@@ -83,6 +102,10 @@ def compute_basis(N):
         # the quantization basis of Hoppe (i.e. with the spherical harmonics).
         adjust_basis_orientation_(w2, m)
 
+        # Assign basis
+        bind0 = basis_break_index(m, N)  # basis_break_indices[m]
+        # bind1 = basis_break_index(m+1, N)  # basis_break_indices[m+1]
+        bind1 = bind0 + (N-m)**2
         basis[bind0:bind1] = w2.ravel()
 
     return basis
@@ -103,7 +126,7 @@ def assign_upper_diag_(diag_m, m, W_out):
 
 
 @njit
-def shr2mat_(omega, basis, W_out):
+def shr2mat_serial_(omega, basis, W_out):
     """
     Low-level implementation of `shr2mat`.
 
@@ -113,26 +136,35 @@ def shr2mat_(omega, basis, W_out):
     basis: ndarray, dtype=float, shape=(np.sum(np.arange(N)**2),)
     W_out: ndarray, dtype=complex, shape=(N,N)
     """
-    N = W_out.shape[0]
-    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
-    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
+    N = W_out.shape[-1]
+    Nmax = N
 
-    for m in range(N):
-        bind0 = basis_break_indices[m]
-        bind1 = basis_break_indices[m+1]
+    # Find out maximum el
+    elmax = N - 1
+    if omega.shape[0] < N**2:
+        elmax = int(np.sqrt(omega.shape[0])) - 1
+        Nmax = elmax + 1
+
+    # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    # basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
+
+    for m in range(Nmax):
+        bind0 = basis_break_index(m, N)  # basis_break_indices[m]
+        # bind1 = basis_break_index(m + 1, N)  # basis_break_indices[m+1]
+        bind1 = bind0 + (N-m)**2
         basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(W_out.dtype)
 
         if m == 0:  # Diagonal
-            omega_zero_ind = elm2ind(np.arange(0, N), 0)
-            diag = basis_m_mat@omega[omega_zero_ind].astype(W_out.dtype)
+            omega_zero_ind = elm2ind(np.arange(0, Nmax), 0)
+            diag = basis_m_mat[:,:Nmax]@omega[omega_zero_ind].astype(W_out.dtype)
             assign_lower_diag_(diag, 0, W_out)
         else:
             # Lower diagonal
-            omega_minus_m_ind = elm2ind(np.arange(m, N), -m)
-            omega_plus_m_ind = elm2ind(np.arange(m, N), m)
+            omega_minus_m_ind = elm2ind(np.arange(m, Nmax), -m)
+            omega_plus_m_ind = elm2ind(np.arange(m, Nmax), m)
             omega_complex = (1./np.sqrt(2))*(omega[omega_plus_m_ind]-1j*omega[omega_minus_m_ind])
             sgn = 1 if m % 2 == 0 else -1
-            diag_m = basis_m_mat@omega_complex
+            diag_m = basis_m_mat[:,:Nmax-m]@omega_complex
             diag_m *= sgn
             assign_lower_diag_(diag_m.conj(), m, W_out)
 
@@ -142,38 +174,149 @@ def shr2mat_(omega, basis, W_out):
     W_out *= 1.0j
 
 
-@njit
-def mat2shr_(W, basis, omega_out):
-    N = W.shape[-1]
-    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
-    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
+@njit(parallel=True, error_model='numpy', fastmath=True)
+def shr2mat_parallel_(omega, basis, W_out):
+    """
+    Low-level parallel implementation of `shr2mat`.
 
-    for m in range(N):
-        bind0 = basis_break_indices[m]
-        bind1 = basis_break_indices[m+1]
+    Parameters
+    ----------
+    omega: ndarray, dtype=float, shape=(N**2,)
+    basis: ndarray, dtype=float, shape=(np.sum(np.arange(N)**2),)
+    W_out: ndarray, dtype=complex, shape=(N,N)
+    """
+    N = W_out.shape[-1]
+
+    # Find out maximum el
+    elmax = N - 1
+    if omega.shape[0] < N**2:
+        elmax = int(np.sqrt(omega.shape[0])) - 1
+    Nmax = elmax + 1
+
+    c1dsq2 = 1./np.sqrt(2)
+
+    for m in prange(Nmax):
+        bind0 = basis_break_index(m, N)
+        bind1 = bind0 + (N-m)**2
+        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m))
+
+        if m == 0:  # Diagonal
+            diag = np.zeros(N, dtype=W_out.dtype)
+            for el in range(0, Nmax):
+                omega_zero_ind = elm2ind(el, 0)
+                diag += basis_m_mat[:, el] * omega[omega_zero_ind]
+            assign_lower_diag_(diag, 0, W_out)
+        else:
+            # Lower diagonal
+            diag_m = np.zeros(N-m, dtype=W_out.dtype)
+            for el in range(m, Nmax):
+                omega_minus_m_ind = elm2ind(el, -m)
+                omega_plus_m_ind = elm2ind(el, m)
+                omega_complex = c1dsq2 * (omega[omega_plus_m_ind] - 1j*omega[omega_minus_m_ind])
+                diag_m += basis_m_mat[:, el-m] * omega_complex
+            sgn = 1 if m % 2 == 0 else -1
+            diag_m *= sgn
+            assign_lower_diag_(diag_m.conj(), m, W_out)
+
+            # Upper diagonal
+            assign_upper_diag_(diag_m, m, W_out)
+
+    W_out *= 1.0j
+
+
+# Default choice
+shr2mat_ = shr2mat_parallel_
+
+
+@njit
+def mat2shr_serial_(W, basis, omega_out):
+    N = W.shape[-1]
+    # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    # basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
+
+    # Find out maximum el
+    elmax = N - 1
+    Nmax = N
+    if omega_out.shape[-1] < N**2:
+        elmax = round(np.sqrt(omega_out.shape[-1])) - 1
+        Nmax = elmax + 1
+
+    for m in range(Nmax):
+        bind0 = basis_break_index(m, N)  # basis_break_indices[m]
+        # bind1 = basis_break_index(m+1, N) # basis_break_indices[m+1]
+        bind1 = bind0 + (N-m)**2
         basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(W.dtype)
 
         if m == 0:  # Diagonal
-            omega_zero_ind = elm2ind(np.arange(0, N), 0)
+            omega_zero_ind = elm2ind(np.arange(0, Nmax), 0)
             diag_m = np.diag(W, 0)  # np.diagonal is more efficient than np.diag, but doesn't work with njit
-            omega_out[omega_zero_ind] = ((diag_m@basis_m_mat)/1.0j).real
+            omega_out[omega_zero_ind] = ((diag_m@basis_m_mat[:,:Nmax])/1.0j).real
 
         else:
             # Lower diagonal
-            omega_pos_m_ind = elm2ind(np.arange(m, N), m)
+            omega_pos_m_ind = elm2ind(np.arange(m, Nmax), m)
             diag_m = np.diag(W, -m)  # np.diagonal is more efficient than np.diag, but doesn't work with njit
-            omega_partial_complex = diag_m@basis_m_mat
+            omega_partial_complex = diag_m@basis_m_mat[:,:Nmax-m]
             sgn = 1 if m % 2 == 0 else -1
             omega_out[omega_pos_m_ind] = np.sqrt(2)*sgn*omega_partial_complex.imag
 
             # Upper diagonal
-            omega_neg_m_ind = elm2ind(np.arange(m, N), -m)
+            omega_neg_m_ind = elm2ind(np.arange(m, Nmax), -m)
             omega_out[omega_neg_m_ind] = -np.sqrt(2)*sgn*omega_partial_complex.real
 
     omega_out /= N
 
 
-@njit
+@njit(parallel=True, error_model='numpy', fastmath=True)
+def mat2shr_parallel_(W, basis, omega_out):
+    N = W.shape[-1]
+
+    # Find out maximum el
+    elmax = N - 1
+    if omega_out.shape[-1] < N**2:
+        elmax = int(np.sqrt(omega_out.shape[-1])) - 1
+    Nmax = elmax + 1
+
+    sqrt2 = np.sqrt(2.0)
+
+    for m in prange(Nmax):
+        bind0 = basis_break_index(m, N)
+        bind1 = bind0 + (N-m)**2
+        basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m))
+
+        if m == 0:  # Diagonal
+            diag = np.zeros(N, dtype=W.dtype)
+            for k in range(N):
+                diag[k] = W[k, k]
+            for el in range(Nmax):
+                omega_zero_ind = elm2ind(el, 0)
+                tmp = (diag*basis_m_mat[:, el]).sum()
+                tmp /= 1.0j
+                omega_out[omega_zero_ind] = np.real(tmp)
+        else:
+            sgn = 1 if m % 2 == 0 else -1
+            diag_m = np.zeros(N-m, dtype=W.dtype)
+            for k in range(N-m):
+                diag_m[k] = W[k+m, k]
+            for el in range(m, Nmax):
+                omega_pos_m_ind = elm2ind(el, m)
+                omega_partial_complex = (diag_m*basis_m_mat[:, el-m]).sum()
+
+                # Lower diagonal
+                omega_out[omega_pos_m_ind] = sqrt2*sgn*np.imag(omega_partial_complex)
+
+                # Upper diagonal
+                omega_neg_m_ind = elm2ind(el, -m)
+                omega_out[omega_neg_m_ind] = -sqrt2*sgn*np.real(omega_partial_complex)
+
+    omega_out /= N
+
+
+# Default choice
+mat2shr_ = mat2shr_parallel_
+
+
+@njit #(parallel=True, error_model='numpy')
 def shc2mat_(omega, basis, W_out):
     """
     Low-level implementation of `shc2mat`.
@@ -185,12 +328,13 @@ def shc2mat_(omega, basis, W_out):
     W_out: ndarray, shape (N,N)
     """
     N = W_out.shape[-1]
-    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
-    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
+    # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    # basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
     for m in range(N):
-        bind0 = basis_break_indices[m]
-        bind1 = basis_break_indices[m+1]
+        bind0 = basis_break_index(m, N)  # basis_break_indices[m]
+        # bind1 = basis_break_index(m + 1, N)  # basis_break_indices[m+1]
+        bind1 = bind0 + (N-m)**2
         basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(W_out.dtype)
 
         # Lower diagonal
@@ -208,15 +352,16 @@ def shc2mat_(omega, basis, W_out):
     W_out *= 1.0j
 
 
-@njit
+@njit #(parallel=True, error_model='numpy')
 def mat2shc_(W, basis, omega_out):
     N = W.shape[0]
-    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
-    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
+    # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    # basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
     for m in range(N):
-        bind0 = basis_break_indices[m]
-        bind1 = basis_break_indices[m+1]
+        bind0 = basis_break_index(m, N)  # basis_break_indices[m]
+        # bind1 = basis_break_index(m + 1, N)  # basis_break_indices[m+1]
+        bind1 = bind0 + (N-m)**2
         basis_m_mat = basis[bind0:bind1].reshape((N-m, N-m)).astype(W.dtype)
 
         # Lower diagonal
@@ -238,7 +383,19 @@ def mat2shc_(W, basis, omega_out):
 # HIGHER LEVEL FUNCTIONS
 # ----------------------
 
-def get_basis(N, allow_compute=True):
+def get_corresponding_dtype(dt):
+    """
+    Return complex dtype corresponding to dt.
+    """
+    return {11: np.csingle,
+            12: np.cdouble,
+            13: np.clongdouble,
+            14: np.single,
+            15: np.double,
+            16: np.longdouble}[np.dtype(dt).num]
+
+
+def get_basis(N, allow_compute=True, dtype=np.float64):
     """
     Return a quantization basis for band limit N.
     The basis is obtained as follows:
@@ -262,15 +419,15 @@ def get_basis(N, allow_compute=True):
     basis = None
 
     # First look in the cache and quickly return if found
-    if N in _basis_cache:
-        return _basis_cache[N]
+    if (N, dtype) in _basis_cache:
+        return _basis_cache[(N, dtype)]
 
     # Next look for a precomputed saved basis
     basis = load_basis(N)
 
     # Finally, if no precomputed basis is to be found, compute it
     if basis is None and allow_compute:
-        basis = compute_basis(N)
+        basis = compute_basis(N, dtype=dtype)
         if 'QUFLOW_SAVE_COMPUTED_BASIS' in os.environ:
             save_computed_basis = False if os.environ['QUFLOW_SAVE_COMPUTED_BASIS'] \
                                            in ("0", "false", "False", "FALSE") else True
@@ -281,7 +438,7 @@ def get_basis(N, allow_compute=True):
 
     # Save basis to cache
     if basis is not None:
-        _basis_cache[N] = basis
+        _basis_cache[(N, dtype)] = basis
 
     return basis
 
@@ -300,38 +457,50 @@ def shr2mat(omega, N=-1):
     -------
     W : ndarray(shape=(N, N), dtype=complex)
     """
+    
+    assert np.isrealobj(omega), "omega must be a real array."
 
     # Process input depending on N
     if N == -1:
         N = round(np.sqrt(omega.shape[0]))
-    else:
-        if omega.shape[0] < N**2:
-            omega = np.hstack((omega, np.zeros(N**2-omega.shape[0])))
-        else:
-            omega = omega[:N**2]
+    # else:
+    #     if omega.shape[0] < N**2:
+    #         omega = np.hstack((omega, np.zeros(N**2-omega.shape[0], dtype=omega.dtype)))
+    #     else:
+    #         omega = omega[:N**2]
 
-    W_out = np.zeros((N, N), dtype=complex)
-    basis = get_basis(N)
+    W_out = np.zeros((N, N), dtype=get_corresponding_dtype(omega.dtype))
+    basis = get_basis(N, omega.dtype)
     shr2mat_(omega, basis, W_out)
 
     return W_out
 
 
-def mat2shr(W):
+def mat2shr(W, elmax=-1):
     """
     Convert NxN complex matrix to real spherical harmonics.
 
     Parameters
     ----------
     W: ndarray(shape=(N, N), dtype=complex)
+    elmax: int (optional)
+        Maximum value of el
 
     Returns
     -------
     omega: ndarray(shape=(N**2,), dtype=float)
     """
-    N = W.shape[0]
-    omega = np.zeros(N**2, dtype=float)
-    basis = get_basis(N)
+
+    assert np.iscomplexobj(W), "W must be a complex array."
+
+    N = W.shape[-1]
+
+    Nmax = N
+    if elmax > 0:
+        Nmax = (elmax+1)**2
+
+    omega = np.zeros(Nmax**2, dtype=get_corresponding_dtype(W.dtype))
+    basis = get_basis(N, dtype=omega.dtype)
     mat2shr_(W, basis, omega)
 
     return omega
@@ -360,8 +529,8 @@ def shc2mat(omega, N=-1):
         else:
             omega = omega[:N**2]
 
-    W_out = np.zeros((N, N), dtype=complex)
-    basis = get_basis(N)
+    W_out = np.zeros((N, N), dtype=omega.dtype)
+    basis = get_basis(N, dtype=get_corresponding_dtype(W_out.dtype))
     shc2mat_(omega, basis, W_out)
 
     return W_out
@@ -380,14 +549,14 @@ def mat2shc(W):
     omega: complex ndarray, shape (N**2,)
     """
     N = W.shape[0]
-    omega = np.zeros(N**2, dtype=complex)
-    basis = get_basis(N)
+    omega = np.zeros(N**2, dtype=W.dtype)
+    basis = get_basis(N, dtype=get_corresponding_dtype(W.dtype))
     mat2shc_(W, basis, omega)
 
     return omega
 
 
-def elmr2mat(el, m, N):
+def elmr2mat(el, m, N, dtype=np.float64):
     """
     Return real T_elm matrix in the sparse format `diamatrix`.
     This gives a basis of u(N).
@@ -403,15 +572,15 @@ def elmr2mat(el, m, N):
     -------
     T_elm: diamatrix, shape (N, N)
     """
-    basis = get_basis(N=N)
-    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
-    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
+    basis = get_basis(N=N, dtype=dtype)
+    # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    # basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
     absm = np.abs(m)
 
-    bind0 = basis_break_indices[absm]
-    bind1 = basis_break_indices[absm+1]
-    basis_m_mat = basis[bind0:bind1].reshape((N-absm, N-absm)).astype(np.complex128)
+    bind0 = basis_break_index(absm, N)  # basis_break_indices[absm]
+    bind1 = basis_break_index(absm + 1, N)  # basis_break_indices[absm+1]
+    basis_m_mat = basis[bind0:bind1].reshape((N-absm, N-absm)).astype(get_corresponding_dtype(dtype))
 
     if m == 0:  # Diagonal
         diag = 1.0j*basis_m_mat[:, el]
@@ -432,7 +601,7 @@ def elmr2mat(el, m, N):
     return T_elm
 
 
-def elmc2mat(el, m, N):
+def elmc2mat(el, m, N, dtype=np.float64):
     """
     Return complex T_elm matrix in the sparse format `diamatrix`.
     This gives a basis of gl(N, C).
@@ -448,15 +617,15 @@ def elmc2mat(el, m, N):
     -------
     T_elm: diamatrix, shape (N, N)
     """
-    basis = get_basis(N=N)
-    basis_break_indices = np.zeros((N+1,), dtype=np.int32)
-    basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
+    basis = get_basis(N=N, dtype=dtype)
+    # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
+    # basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
     absm = np.abs(m)
 
-    bind0 = basis_break_indices[absm]
-    bind1 = basis_break_indices[absm+1]
-    basis_m_mat = basis[bind0:bind1].reshape((N-absm, N-absm)).astype(np.complex128)
+    bind0 = basis_break_index(absm, N)  # basis_break_indices[absm]
+    bind1 = basis_break_index(absm + 1, N)  # basis_break_indices[absm+1]
+    basis_m_mat = basis[bind0:bind1].reshape((N-absm, N-absm)).astype(get_corresponding_dtype(dtype))
 
     data = np.zeros(N, dtype=basis_m_mat.dtype)
     if m >= 0:

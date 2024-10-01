@@ -15,6 +15,14 @@ parser.add_argument("-s", "--single", help="Use single precision (default is dou
 parser.add_argument("-b", "--basename", help="Base for output textfile.", type=str, default="profile")
 args = parser.parse_args()
 
+#
+# Profiling code for QUFLOW. Run as follows:
+#
+# > python run_profiling.py -b BASENAME
+#
+# This generates a file BASENAME_*.txt with profiling timings.
+# Notice that you need `prettytable` which can be installed via conda:
+# > conda install prettytable
 
 ############ PRERUN CODE BEGIN #############
 #_PRERUNCODE_
@@ -95,9 +103,27 @@ def profile_poisson_gpu(W, repeats, repeat_correction=10):
     return (time.time()-start_time)/repeats
 
 
+def profile_inner_cpu(W, repeats, repeat_correction=10):
+    repeats *= repeat_correction
+    W2 = qf.laplacian.cpu.laplace(W)
+    start_time = time.time()
+    for k in range(repeats):
+        W2 = qf.laplacian.cpu.laplace(W)
+    return (time.time()-start_time)/repeats
+
+
+def profile_inner_gpu(W, repeats, repeat_correction=10):
+    repeats *= repeat_correction
+    W2 = qf.laplacian.gpu.laplace(W)
+    start_time = time.time()
+    for k in range(repeats):
+        W2 = qf.laplacian.gpu.laplace(W)
+    return (time.time()-start_time)/repeats
+
+
 def profile_isomp(W, repeats, compsum=True):
     start_time = time.time()
-    qf.isomp_fixedpoint2(W, stepsize=0.01, steps=repeats, minit=10, maxit=10, compsum=compsum)
+    qf.isomp_fixedpoint(W, stepsize=0.01, steps=repeats, minit=10, maxit=10, compsum=compsum)
     return (time.time()-start_time)/repeats
 
 
@@ -118,6 +144,8 @@ tab.field_names = ["N",
                    "mat2shr", 
                    "poisson_cpu", 
                    "poisson_gpu", 
+                   "inner_cpu",
+                   "inner_gpu",
                    "isomp"]
 
 # Create N list

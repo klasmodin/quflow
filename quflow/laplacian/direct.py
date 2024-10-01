@@ -15,8 +15,8 @@ _direct_viscdamp_cache = dict()
 # LOWER LEVEL FUNCTIONS
 # ---------------------
 
-@njit
-def compute_direct_laplacian(N, bc=False):
+@njit(error_model='numpy', fastmath=True)
+def compute_direct_laplacian(N, bc=False, dtype=np.float64):
     """
     Compute direct laplacian.
 
@@ -33,7 +33,7 @@ def compute_direct_laplacian(N, bc=False):
     """
     s = (N - 1)/2
     mvals = np.linspace(-s, s, N)
-    lap = np.zeros((2, N*(N+1)//2), dtype=np.float64)
+    lap = np.zeros((2, N*(N+1)//2), dtype=dtype)
 
     for m1 in mvals:
         for m2 in mvals:

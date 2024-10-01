@@ -23,6 +23,19 @@ def test_compute_basis(N):
     # assert np.abs(basis-basis_computed).max() < 1e-10
 
 
+@pytest.mark.parametrize("N", [33, 65, 513])
+def test_basis_break_index(N):
+    basis_break_indices = np.hstack((0, (np.arange(N, 0, -1)**2).cumsum()))
+    for m in range(N+1):
+        np.testing.assert_equal(qf.basis_break_index(m, N), basis_break_indices[m])
+
+
+@pytest.mark.parametrize("N", [33, 65, 513])
+def test_basis_break_index_vectorized(N):
+    basis_break_indices = np.hstack((0, (np.arange(N, 0, -1)**2).cumsum()))
+    np.testing.assert_equal(qf.basis_break_index(np.arange(N+1), N), basis_break_indices)
+
+
 @pytest.mark.parametrize("omega", [get_random_omega_real(), get_random_omega_real(17)])
 def test_shr2mat_(omega):
     N = round(np.sqrt(omega.shape[0]))
@@ -36,6 +49,20 @@ def test_shr2mat_(omega):
 
     np.testing.assert_allclose(W, W2)
     # assert W == pytest.approx(W2)
+
+
+@pytest.mark.parametrize("omega", [get_random_omega_real(10)])
+@pytest.mark.parametrize("N", [33, 64, 128])
+def test_shr2mat_short_omega(omega, N):
+    basis = qf.get_basis(N)
+    W = np.zeros((N, N), dtype=complex)
+    qf.shr2mat_(omega, basis, W)
+
+    omega2 = np.hstack((omega, np.zeros(N**2-omega.shape[0], dtype=omega.dtype)))
+    W2 = np.zeros((N, N), dtype=complex)
+    qf.shr2mat_(omega2, basis, W2)
+
+    np.testing.assert_allclose(W, W2)
 
 
 @pytest.mark.parametrize("W", [get_random_mat(), get_random_mat(17)])
@@ -52,6 +79,19 @@ def test_mat2shr_(W):
 
     np.testing.assert_allclose(omega, omega2)
     # assert omega == pytest.approx(omega2)
+
+
+@pytest.mark.parametrize("omega", [get_random_omega_real(10)])
+@pytest.mark.parametrize("N", [33, 64, 128])
+def test_mat2shr_short_omega(omega, N):
+    basis = qf.get_basis(N)
+
+    W = qf.shr2mat(omega, N=N)
+
+    omega2 = omega.copy()
+    qf.mat2shr_(W, basis, omega2)
+
+    np.testing.assert_allclose(omega, omega2)
 
 
 @pytest.mark.parametrize("m", [0, -4, 4, -9, 9])
