@@ -5,7 +5,7 @@ import numba as nb
 
 from ..laplacian import solve_poisson, solve_heat
 from ..laplacian import select_skewherm as select_skewherm_laplacian
-from ..geometry import norm_Linf
+from ..geometry import norm_Linf, bracket
 from .isospectral import commutator
 from .isospectral import update_stats
 
@@ -15,7 +15,7 @@ from .isospectral import update_stats
 # -------------------------------------------------
 
 def euler(W: np.ndarray,
-          stepsize: float = 0.1,
+          dt: float,
           steps: int = 100,
           hamiltonian=solve_poisson,
           forcing=None,
@@ -28,7 +28,7 @@ def euler(W: np.ndarray,
     ----------
     W: ndarray
         Initial vorticity (overwritten and returned).
-    stepsize: float
+    dt: float
         Time step length.
     steps: int
         Number of steps to take.
@@ -46,15 +46,15 @@ def euler(W: np.ndarray,
     W: ndarray
     """
     if forcing is None:
-        rhs = commutator
+        rhs = bracket
     else:
         def rhs(P, W):
-            return commutator(P, W) + forcing(P, W)
+            return bracket(P, W) + forcing(P, W)
 
     for k in range(steps):
         P = hamiltonian(W)
         VF = rhs(P, W)
-        W += stepsize*VF
+        W += dt*VF
 
     if stats is not None:
         update_stats(stats, steps=steps)
@@ -62,7 +62,7 @@ def euler(W: np.ndarray,
     return W
 
 
-def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
+def heun(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None):
     """
     Time-stepping by Heun's second order method.
 
@@ -70,7 +70,7 @@ def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
     ----------
     W: ndarray
         Initial vorticity (overwritten and returned).
-    stepsize: float
+    dt: float
         Time step length.
     steps: int
         Number of steps to take.
@@ -84,10 +84,10 @@ def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
     W: ndarray
     """
     if forcing is None:
-        rhs = commutator
+        rhs = bracket
     else:
         def rhs(P, W):
-            return commutator(P, W) + forcing(P, W)
+            return bracket(P, W) + forcing(P, W)
 
     for k in range(steps):
 
@@ -96,7 +96,7 @@ def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
         F0 = rhs(P, W)
 
         # Compute Heun predictor
-        Wprime = W + stepsize*F0
+        Wprime = W + dt*F0
 
         # Evaluate RHS at predictor WP
         P = hamiltonian(Wprime)
@@ -104,7 +104,7 @@ def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
 
         # Compute averaged RHS
         F += F0
-        F *= stepsize/2.0
+        F *= dt/2.0
 
         # Update W
         W += F
@@ -112,7 +112,7 @@ def heun(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
     return W
 
 
-def rk4(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
+def rk4(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None):
     """
     Time-stepping by the classical Runge-Kutta fourth order method.
 
@@ -120,7 +120,7 @@ def rk4(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
     ----------
     W: ndarray
         Initial vorticity (overwritten and returned).
-    stepsize: float
+    dt: float
         Time step length.
     steps: int
         Number of steps to take.
@@ -134,28 +134,28 @@ def rk4(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
     W: ndarray
     """
     if forcing is None:
-        rhs = commutator
+        rhs = bracket
     else:
         def rhs(P, W):
-            return commutator(P, W) + forcing(P, W)
+            return bracket(P, W) + forcing(P, W)
 
     for k in range(steps):
         P = hamiltonian(W)
         K1 = rhs(P, W)
 
-        Wprime = W + (stepsize/2.0)*K1
+        Wprime = W + (dt/2.0)*K1
         P = hamiltonian(Wprime)
         K2 = rhs(P, Wprime)
 
-        Wprime = W + (stepsize/2.0)*K2
+        Wprime = W + (dt/2.0)*K2
         P = hamiltonian(Wprime)
         K3 = rhs(P, Wprime)
 
-        Wprime = W + stepsize*K3
+        Wprime = W + dt*K3
         P = hamiltonian(Wprime)
         K4 = rhs(P, Wprime)
 
-        W += (stepsize/6.0)*(K1+2*K2+2*K3+K4)
+        W += (dt/6.0)*(K1+2*K2+2*K3+K4)
 
     return W
 

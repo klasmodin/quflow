@@ -5,7 +5,7 @@ import numba as nb
 
 from ..laplacian import solve_poisson, solve_heat
 from ..laplacian import select_skewherm as select_skewherm_laplacian
-from ..geometry import norm_Linf
+from ..geometry import norm_Linf, hbar
 
 # ----------------
 # GLOBAL VARIABLES
@@ -152,7 +152,7 @@ def estimate_stepsize(W, P=None, safety_factor=0.1):
 # ISOSPECTRAL METHODS
 # -------------------
 
-def isomp_quasinewton(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None,
+def isomp_quasinewton(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None,
                       tol="auto", maxit=10, verbatim=False):
     """
     Time-stepping by isospectral midpoint second order method using
@@ -163,7 +163,7 @@ def isomp_quasinewton(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
     ----------
     W: ndarray
         Initial vorticity (overwritten and returned).
-    stepsize: float
+    dt: float
         Time step length.
     steps: int
         Number of steps to take.
@@ -187,6 +187,8 @@ def isomp_quasinewton(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
 
     if not _SKEW_HERM_:
         assert NotImplementedError("isomp_quasinewton might not work for non-skewherm.")
+
+    stepsize = dt / hbar(N=W.shape[-1])
 
     # Specify tolerance if needed
     if tol == "auto" or tol < 0:
@@ -253,7 +255,7 @@ def isomp_quasinewton(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, for
     return W
 
 
-def isomp_simple(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=None):
+def isomp_simple(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None):
     """
     Time-stepping by the simplified isospectral midpoint method.
     This is an explicit isospectral method but not symplectic. Nor is it reversible.
@@ -262,7 +264,7 @@ def isomp_simple(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=
     ----------
     W: ndarray
         Initial vorticity (overwritten and returned).
-    stepsize: float
+    dt: float
         Time step length.
     steps: int
         Number of steps to take.
@@ -280,6 +282,8 @@ def isomp_simple(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=
     Id = np.eye(W.shape[0])
 
     Wtilde = W.copy()
+
+    stepsize = dt/hbar(W.shape[-1])
 
     if forcing is not None:
         assert NotImplementedError("Forcing for isomp_simple is not implemented yet.")
@@ -331,12 +335,13 @@ def isomp_simple(W, stepsize=0.1, steps=100, hamiltonian=solve_poisson, forcing=
     return W
 
 
-def isomp_fixedpoint(W, 
-                     stepsize, 
+def isomp_fixedpoint(W,
+                     dt, 
                      steps=100, 
                      hamiltonian=solve_poisson, 
                      time=None, 
                      forcing=None, 
+                     strang_splitting=None,
                      stats=None,
                      callback=None,
                      tol='auto', 
@@ -355,7 +360,7 @@ def isomp_fixedpoint(W,
     ----------
     W: ndarray
         Initial skew-Hermitian vorticity matrix (overwritten and returned).
-    stepsize: float
+    dt: float
         Time step length.
     steps: int
         Number of steps to take.
@@ -366,6 +371,8 @@ def isomp_fixedpoint(W,
         be autonomous, and the time parameter is not passed to the hamiltonian and forcing.
     forcing: function(P, W) or function(P, W, time) or None (default)
         Extra force function (to allow non-isospectral perturbations).
+    strang_splitting: function(dt, W) or None (default)
+        Strang splitting updates applied before and after each basic step.
     stats: dict or None
         Dictionary to be filled in with integration statistics.
     callback: function(W, dW, stats) or None (default)
@@ -404,7 +411,7 @@ def isomp_fixedpoint(W,
         autonomous_force = True
         if time is not None and 'time' in inspect.getfullargspec(forcing).args:
             autonomous_force = False
-            FW = np.zeros_like(W)
+        FW = np.zeros_like(W)
     
     # Check if autonomous
     autonomous = True
@@ -421,7 +428,9 @@ def isomp_fixedpoint(W,
     Whalf = np.zeros_like(W)
     PWcomm = np.zeros_like(W)
     # PWPhalf = np.zeros_like(W)
-    hhalf = stepsize/2.0
+    # dthalf = dt/2.0
+    hb = hbar(N=W.shape[-1])
+    vareps = dt/(2*hb)
 
     # Specify tolerance if needed
     if tol == "auto" or tol < 0:
@@ -430,9 +439,9 @@ def isomp_fixedpoint(W,
             mach_eps = np.sqrt(mach_eps)
         if W.ndim > 2:
             zeroind = (0,)*(W.ndim-2) + (Ellipsis,)
-            tol = mach_eps*stepsize*np.linalg.norm(W[zeroind], np.inf)
+            tol = (mach_eps*dt/hb)*np.linalg.norm(W[zeroind], np.inf)
         else:
-            tol = mach_eps*stepsize*np.linalg.norm(W, np.inf)
+            tol = (mach_eps*dt/hb)*np.linalg.norm(W, np.inf)
         if verbatim:
             print("Tolerance set to {}.".format(tol))
         if stats:
@@ -447,6 +456,10 @@ def isomp_fixedpoint(W,
 
     # --- Beginning of step loop ---
     for k in range(steps):
+
+        # Apply half a Strang step
+        if strang_splitting:
+            W = strang_splitting(dt/2, W)
 
         # Per step updates
         resnorm = np.inf
@@ -470,8 +483,8 @@ def isomp_fixedpoint(W,
             if autonomous:
                 Phalf = hamiltonian(Whalf)
             else:
-                Phalf = hamiltonian(Whalf, time=time + hhalf)
-            Phalf *= hhalf
+                Phalf = hamiltonian(Whalf, time=time + dt/2)
+            Phalf *= vareps
 
             # Compute middle variables
             # PWcomm = Phalf @ Whalf  # old
@@ -493,14 +506,12 @@ def isomp_fixedpoint(W,
             # Add forcing if needed
             if forcing:
                 # Compute forcing if needed
-                # if force_accepts_out:
-                #     forcing(Phalf/hhalf, Whalf, out=FW)
-                # else:
+                Phalf /= vareps
                 if autonomous_force:
-                    FW = forcing(Phalf/hhalf, Whalf)
+                    FW = forcing(Phalf, Whalf)
                 else:
-                    FW = forcing(Phalf/hhalf, Whalf, time=time + hhalf)
-                FW *= hhalf
+                    FW = forcing(Phalf, Whalf, time=time + dt/2)
+                FW *= dt/2
                 dW += FW
 
             # Check if time to break
@@ -568,11 +579,23 @@ def isomp_fixedpoint(W,
 
             # 4.
             np.copyto(W, t_compsum)
-        else:
-            W += PWcomm        
 
-        if time:
-            time += stepsize
+            if forcing:
+                raise NotImplementedError("Compensated sum with forcing is not yet implemented.")
+
+        else:
+            W += PWcomm   
+
+            if forcing:
+                FW *= 2
+                W += FW
+     
+        if time is not None:
+            time += dt
+
+        # Apply half a Strang step
+        if strang_splitting:
+            W = strang_splitting(dt/2, W)
 
         # --- End of step ---
 

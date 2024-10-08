@@ -12,6 +12,7 @@ from .transforms import shc2fun, shr2fun
 from .laplacian import solve_poisson
 from .integrators import isomp
 from .utils import elm2ind, qtime2seconds, seconds2qtime
+from .geometry import hbar
 
 
 # from quflow import solve_poisson
@@ -22,7 +23,7 @@ from .utils import elm2ind, qtime2seconds, seconds2qtime
 
 _default_qutypes = {'mat': None, 'fun': np.float32}
 _default_qutype2varname = {'mat': 'mat', 'fun': 'fun', 'shr': 'shr', 'shc': 'shc'}
-_pickled_argnames = ['qutypes', 'hamiltonian', 'forcing', 'integrator', 'callback', 'integrator_callback']
+_pickled_argnames = ['qutypes', 'hamiltonian', 'forcing', 'integrator', 'callback', 'integrator_callback', 'strang_splitting']
 _info_args = ['info']
 
 # ----------------------
@@ -381,7 +382,7 @@ class QuSimulation(object):
 # SOLVE FUNCTION DEF
 # ----------------------
 
-def solve(W, stepsize=None, timestep=None,
+def solve(W, stepsize=None, dt=None,
           steps=None, simtime=None,
           inner_steps=None, inner_time=None,
           integrator=None,
@@ -395,14 +396,12 @@ def solve(W, stepsize=None, timestep=None,
     ----------
     W: ndarray(shape=(N, N) or (k, N, N), dtype=complex)
         Initial vorticity matrix.
+    dt: None or float
+        Time step in seconds.
     stepsize: None or float
         Stepsize parameter, related to the actual time step length
-        by `timestep = hbar * stepsize`.
-        If neither `stepsize` nor `timestep` are specified,
-        `stepsize` will be automatically selected.
-    timestep: None or float
-        Time step in seconds.
-        Not used when `stepsize` is specified.
+        by `dt = hbar * stepsize`.
+        Not used when `dt` is specified.
     steps: None or int
         Total number of steps to take.
     simtime: None or float
@@ -431,10 +430,13 @@ def solve(W, stepsize=None, timestep=None,
         Extra keyword arguments to send to integrator at each step.
     """
 
+    time = 0.0 if 'time' not in kwargs else kwargs['time']
+
     # Preprocess attributes from QuSimulation object
     if isinstance(W, QuSimulation):
         sim = W
-        W = sim['mat',-1]
+        W = sim['mat', -1]
+        time = sim['time', -1]
         if callback is None:
             callback = sim
         elif isinstance(callback, tuple):
@@ -442,10 +444,10 @@ def solve(W, stepsize=None, timestep=None,
         else:
             callback = (callback, sim)
         for name, value in sim.args():
-            if name == 'stepsize' and stepsize is None:
+            if name == 'dt' and dt is None:
+                dt = value
+            elif name == 'stepsize' and stepsize is None:
                 stepsize = value
-            elif name == 'timestep' and timestep is None:
-                timestep = value
             elif name == 'steps' and steps is None:
                 steps = value
             elif name == 'simtime' and simtime is None:
@@ -472,12 +474,19 @@ def solve(W, stepsize=None, timestep=None,
     # Size of state matrix
     N = W.shape[-1]
 
+    # Set dt if not selected
+    if dt is None:
+        if stepsize is None:
+            raise ValueError("Either `dt` or `stepsize` must be specified.")
+        dt = stepsize*hbar(N=N)
+
     # Set default integrator if needed
     if integrator is None:
         integrator = isomp
 
     # Set default hamiltonian if needed
     integrator_kwargs = kwargs
+    integrator_kwargs['time'] = time
     if 'hamiltonian' not in integrator_kwargs:
         integrator_kwargs['hamiltonian'] = solve_poisson
     if 'stats' in inspect.getfullargspec(integrator).args:
@@ -489,8 +498,9 @@ def solve(W, stepsize=None, timestep=None,
     if np.array([0 if x is None else 1 for x in [steps, simtime]]).sum() != 1:
         raise ValueError("One, and only one, of steps or simtime should be specified.")
     if simtime is not None:
-        qtime = seconds2qtime(simtime, N)
-        steps = round(qtime / np.abs(stepsize))
+        # qtime = seconds2qtime(simtime, N)
+        # steps = round(qtime / np.abs(stepsize))
+        steps = round(simtime / np.abs(dt))
     if callback is not None and not isinstance(callback, tuple):
         callback = (callback,)
     if callback_kwargs is None:
@@ -501,7 +511,8 @@ def solve(W, stepsize=None, timestep=None,
         inner_steps = 100  # Default value of inner_steps
     elif inner_steps is None:
         if inner_time is not None:
-            inner_steps = round(seconds2qtime(inner_time, N) / np.abs(stepsize))
+            # inner_steps = round(seconds2qtime(inner_time, N) / np.abs(stepsize))
+            inner_steps = round(inner_time / np.abs(dt))
 
     # Check if inner_steps is too large
     if inner_steps > steps:
@@ -529,8 +540,9 @@ def solve(W, stepsize=None, timestep=None,
             no_steps = steps-k
         else:
             no_steps = inner_steps
-        W = integrator(W, stepsize, steps=no_steps, **integrator_kwargs)
-        delta_time = qtime2seconds(no_steps*stepsize, N=N)
+        W = integrator(W, dt, steps=no_steps, **integrator_kwargs)
+        # delta_time = qtime2seconds(no_steps*stepsize, N=N)
+        delta_time = no_steps*dt
         if progress_bar:
             pbar.update(no_steps)
         if callback is not None:

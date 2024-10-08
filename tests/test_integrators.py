@@ -24,11 +24,12 @@ def test_compare_isomp_rk4(N):
     omega0 = np.random.randn(10)
     W0 = qf.shr2mat(omega0, N=N)
     stepsize = 0.02
+    dt = stepsize*qf.hbar(N)
     steps = 500
     Wrk4 = W0.copy()
     Wisomp = W0.copy()
-    Wrk4 = qf.integrators.rk4(Wrk4, stepsize, steps)
-    Wisomp = qf.integrators.isomp(Wisomp, stepsize, steps)
+    Wrk4 = qf.integrators.rk4(Wrk4, dt, steps)
+    Wisomp = qf.integrators.isomp(Wisomp, dt, steps)
 
     np.testing.assert_allclose(Wrk4, Wisomp, atol=1e-2, rtol=0)
 
@@ -37,18 +38,20 @@ def test_compare_isomp_rk4(N):
 @pytest.mark.parametrize("tol", ['auto', 1e-10])
 def test_isomp_against_ref(use_compsum, tol):
     W0, Wfinal, stepsize, steps = get_isomp_reference_solution()
+    dt = qf.hbar(N=W0.shape[-1])*stepsize
 
     W = W0.copy()
-    W = qf.integrators.isomp(W, stepsize, steps, compsum=use_compsum, tol=tol)
+    W = qf.integrators.isomp(W, dt, steps, compsum=use_compsum, tol=tol)
     np.testing.assert_allclose(W, Wfinal, rtol=0, atol=1e-7)
 
 
 @pytest.mark.parametrize("tol", ['auto', 1e-10])
 def test_isomp_quasinewton_against_ref(tol):
     W0, Wfinal, stepsize, steps = get_isomp_reference_solution()
+    dt = qf.hbar(N=W0.shape[-1])*stepsize
 
     W = W0.copy()
-    W = qf.integrators.isomp_quasinewton(W, stepsize, steps, tol=tol)
+    W = qf.integrators.isomp_quasinewton(W, dt, steps, tol=tol)
     np.testing.assert_allclose(W, Wfinal, rtol=0, atol=1e-7)
 
 

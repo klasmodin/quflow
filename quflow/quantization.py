@@ -195,6 +195,13 @@ def shr2mat_parallel_(omega, basis, W_out):
 
     c1dsq2 = 1./np.sqrt(2)
 
+    # elmin = 0
+    # for el in range(elmax+1):
+    #     for m in range(-m, m+1):
+    #         if omega[elm2ind(el, m)] != 0.0:
+    #             break
+    #     elmin += 1
+
     for m in prange(Nmax):
         bind0 = basis_break_index(m, N)
         bind1 = bind0 + (N-m)**2
@@ -204,7 +211,9 @@ def shr2mat_parallel_(omega, basis, W_out):
             diag = np.zeros(N, dtype=W_out.dtype)
             for el in range(0, Nmax):
                 omega_zero_ind = elm2ind(el, 0)
-                diag += basis_m_mat[:, el] * omega[omega_zero_ind]
+                omega_elm = omega[omega_zero_ind]
+                if omega_elm != 0.0:
+                    diag += basis_m_mat[:, el] * omega_elm
             assign_lower_diag_(diag, 0, W_out)
         else:
             # Lower diagonal
@@ -212,8 +221,10 @@ def shr2mat_parallel_(omega, basis, W_out):
             for el in range(m, Nmax):
                 omega_minus_m_ind = elm2ind(el, -m)
                 omega_plus_m_ind = elm2ind(el, m)
+
                 omega_complex = c1dsq2 * (omega[omega_plus_m_ind] - 1j*omega[omega_minus_m_ind])
-                diag_m += basis_m_mat[:, el-m] * omega_complex
+                if omega_complex != 0.0j:
+                    diag_m += basis_m_mat[:, el-m] * omega_complex
             sgn = 1 if m % 2 == 0 else -1
             diag_m *= sgn
             assign_lower_diag_(diag_m.conj(), m, W_out)
