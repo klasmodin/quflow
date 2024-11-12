@@ -581,13 +581,24 @@ def laplace(P):
     # Apply dot product
     if isspmatrix_dia(P):
         # Sparse diamatrix
-        lap = laplacian(N, dtype=np.float32 if P.dtype == np.complex64 else np.float64)
-        W = P.copy()
-        for P_diag_m, W_diag_m, m in zip(P.data, W.data, P.offsets):
-            if m < 0:
-                dot_cpu_m_diag_(lap, P_diag_m[:N+m], W_diag_m[:N+m])
-            else:
-                dot_cpu_m_diag_(lap, P_diag_m[m:], W_diag_m[m:])
+
+        if hasattr(P, "el"):
+            # This is a hack to keep track of "pure el" dia_matrix objects.
+            # It makes the calculations of laplace and solve_poisson much faster.
+            # In the future, one should probably make a subclass
+            # of dia_matrix instead.
+            el = P.el
+            W = P.copy()
+            W *= -el*(el+1)
+            W.el = el  # The new dia_matrix will have the same el.
+        else:
+            lap = laplacian(N, dtype=np.float32 if P.dtype == np.complex64 else np.float64)
+            W = P.copy()
+            for P_diag_m, W_diag_m, m in zip(P.data, W.data, P.offsets):
+                if m < 0:
+                    dot_cpu_m_diag_(lap, P_diag_m[:N+m], W_diag_m[:N+m])
+                else:
+                    dot_cpu_m_diag_(lap, P_diag_m[m:], W_diag_m[m:])
     else:
         # Full matrix
         lap = laplacian(N, dtype=type(P[0, 0].real))
@@ -630,13 +641,23 @@ def solve_poisson(W, reduce=select_first):
 
     if isspmatrix_dia(W):
         # Sparse diamatrix
-        lap = laplacian(N, bc=True, dtype=np.float32 if W.dtype == np.complex64 else np.float64)
-        P = W.copy()
-        for W_diag_m, P_diag_m, m in zip(W.data, P.data, W.offsets):
-            if m < 0:
-                solve_cpu_m_diag_(lap, W_diag_m[:N+m], P_diag_m[:N+m])
-            else:
-                solve_cpu_m_diag_(lap, W_diag_m[m:], P_diag_m[m:])
+        if hasattr(W, "el") and W.el > 0:
+            # This is a hack to keep track of "pure el" dia_matrix objects.
+            # It makes the calculations of laplace and solve_poisson much faster.
+            # In the future, one should probably make a subclass
+            # of dia_matrix instead.
+            el = W.el
+            P = W.copy()
+            P /= -el*(el+1)
+            P.el = el  # The new dia_matrix will have the same el.
+        else:
+            lap = laplacian(N, bc=True, dtype=np.float32 if W.dtype == np.complex64 else np.float64)
+            P = W.copy()
+            for W_diag_m, P_diag_m, m in zip(W.data, P.data, W.offsets):
+                if m < 0:
+                    solve_cpu_m_diag_(lap, W_diag_m[:N+m], P_diag_m[:N+m])
+                else:
+                    solve_cpu_m_diag_(lap, W_diag_m[m:], P_diag_m[m:])
     else:
         lap = laplacian(N, bc=True, dtype=type(W[0, 0].real))
         P = _get_cache(W_shape, W.dtype)

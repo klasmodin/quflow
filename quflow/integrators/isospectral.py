@@ -400,24 +400,28 @@ def isomp_fixedpoint(W,
     assert minit >= 1, "minit must be at least 1."
     assert maxit >= minit, "maxit must be at minit."
 
-    # Check if Hamiltonian accepts 'out' argument
-    # hamiltonian_accepts_out = False
-    # if 'out' in inspect.getfullargspec(hamiltonian).args:
-    #     hamiltonian_accepts_out = True
-    #     Phalf = np.zeros_like(W)
-
     # Check if force function is autonomous
     if forcing is not None:
         autonomous_force = True
-        if time is not None and 'time' in inspect.getfullargspec(forcing).args:
-            autonomous_force = False
+        if time is not None:
+            try:
+                FW = forcing(W, W, time=time)
+            except TypeError:
+                pass
+            else:
+                autonomous_force = False
         FW = np.zeros_like(W)
     
     # Check if autonomous
     autonomous = True
-    if time is not None and 'time' in inspect.getfullargspec(hamiltonian).args:
-        autonomous = False
-
+    if time is not None:
+        try:
+            Phalf = hamiltonian(W, time=time)
+        except TypeError:
+            pass
+        else:
+            autonomous = False
+    
     # Stats variables
     total_iterations = 0
     number_of_maxit = 0

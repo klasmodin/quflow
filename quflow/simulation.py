@@ -11,11 +11,26 @@ from .quantization import mat2shr
 from .transforms import shc2fun, shr2fun
 from .laplacian import solve_poisson
 from .integrators import isomp
-from .utils import elm2ind, qtime2seconds, seconds2qtime
+from .utils import elm2ind
 from .geometry import hbar
 
 
 # from quflow import solve_poisson
+
+# ----------------
+# Helper functions
+# ----------------
+def in_notebook():
+    try:
+        from IPython import get_ipython
+        if 'IPKernelApp' not in get_ipython().config:  # pragma: no cover
+            return False
+    except ImportError:
+        return False
+    except AttributeError:
+        return False
+    return True
+
 
 # ----------------
 # GLOBAL VARIABLES
@@ -123,8 +138,8 @@ class QuSimulation(object):
 
         else:
             with h5py.File(self.filename, "r") as f:
-                if "prerun" in f[self.datapath].attrs:
-                    exec(f[self.datapath].attrs["prerun"], globals())
+                # if "prerun" in f[self.datapath].attrs:
+                    # exec(f[self.datapath].attrs["prerun"], globals())
                 self.qutypes = pickle.loads(f[self.datapath].attrs["qutypes"][0])
                 if "N" in f[self.datapath].attrs and state is not None:
                     raise ValueError(self.filename + " has already been initialized with W.")
@@ -378,6 +393,72 @@ class QuSimulation(object):
                 varset[-1, ...] = value
 
 
+# -------------------------
+# RUNFILE CREATION FUNCTION
+# -------------------------
+
+def create_runfile(sim, folder=True, bash=True, overwrite=False, external=None):
+    """
+    Create cluster runfile from QuSimulation object.
+
+    Parameters
+    ----------
+    sim: QuSimulation or str
+        If str, interpret as filename of QuSimulation file.
+    folder: bool
+        Whether to create a new folder. This also copies 
+        the QuSimulation file.
+    bash: bool
+        Whether to create bash-file.
+    overwrite: bool
+        Whether to overwrite existing files or folders.
+    external: str
+        Code external to QUFLOW needed to run the simulation
+        (for example a Hamiltonian for force function).
+    """
+    if not isinstance(sim, QuSimulation):
+        if isinstance(sim, str):
+            # Assume it is the filename
+            sim = QuSimulation(sim)
+    
+    filestr = """
+import numpy as np
+import quflow as qf
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-f", "--filename", help="Simfile name", type=str, default="{}") 
+# parser.add_argument("-a", "--animate", help="Animate results.", action="store_true")
+# parser.add_argument("-s", "--simulate", help="Simulate.", action="store_true")
+parser.add_argument("-t", "--simtime", help="Total simulation time.", type=float)
+args = parser.parse_args()
+
+filename = args.filename
+
+# ---------- Externally defined code ----------
+
+{}
+
+# ---------------------------------------------
+
+# Load simulation from file
+mysim = qf.QuSimulation(filename)
+
+if args.simtime is not None:
+    mysim['simtime'] = np.float64(args.simtime)
+
+# Run simulation
+qf.solve(mysim)
+
+# Create animation
+qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'])
+
+""".format(sim.filename, sim['prerun'])
+    
+    with open(sim.filename.replace(".hdf5", "_runfile.py"), "w") as text_file:
+        text_file.write(filestr)
+    
+
 # ----------------------
 # SOLVE FUNCTION DEF
 # ----------------------
@@ -525,7 +606,10 @@ def solve(W, stepsize=None, dt=None,
                 if 'verbatim' in integrator_kwargs and integrator_kwargs['verbatim']:
                     progress_bar = False
                 else:
-                    from tqdm import tqdm
+                    if in_notebook():
+                        from tqdm.notebook import tqdm
+                    else:
+                        from tqdm import tqdm
                     pbar = tqdm(total=steps, unit=' steps')
             else:
                 from tqdm import tqdm
@@ -543,6 +627,7 @@ def solve(W, stepsize=None, dt=None,
         W = integrator(W, dt, steps=no_steps, **integrator_kwargs)
         # delta_time = qtime2seconds(no_steps*stepsize, N=N)
         delta_time = no_steps*dt
+        integrator_kwargs['time'] += delta_time
         if progress_bar:
             pbar.update(no_steps)
         if callback is not None:

@@ -4,6 +4,30 @@ import os
 from numba import njit, prange
 
 
+def complex_dtype(dt):
+    """
+    Return complex dtype corresponding to dt.
+    """
+    return {11: np.csingle,
+            12: np.cdouble,
+            13: np.clongdouble,
+            14: np.csingle,
+            15: np.cdouble,
+            16: np.clongdouble}[np.dtype(dt).num]
+
+
+def real_dtype(dt):
+    """
+    Return real dtype corresponding to dt.
+    """
+    return {11: np.single,
+            12: np.double,
+            13: np.longdouble,
+            14: np.single,
+            15: np.double,
+            16: np.longdouble}[np.dtype(dt).num]
+
+
 def poisson_finite_differences(omegafun, psifun):
     """
     Compute approximation of Poisson bracket using finite differences.

@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit
 from scipy.linalg import expm
-from scipy.sparse import isspmatrix_dia
+from scipy.sparse import isspmatrix_dia, dia_matrix
 
 
 @njit(error_model='numpy', fastmath=True)
@@ -10,9 +10,41 @@ def hbar(N):
 
 
 @njit(error_model='numpy', fastmath=True)
+def mult_dia_core(a_data, a_offsets, b_data, b_offsets, N):
+    c_data = np.zeros((a_data.shape[0]*b_data.shape[0], N), dtype=a_data.dtype)
+    c_offsets = np.zeros(c_data.shape[0], dtype=a_offsets.dtype)
+    c_offsets.fill(N+1)
+    kmax = 0
+    for m in range(a_data.shape[0]):
+        a_offset = a_offsets[m]
+        for n in range(b_data.shape[0]):
+            b_offset = b_offsets[n]
+            c_offset = a_offset + b_offset
+            if np.abs(c_offset) < N:
+                k = 0
+                while c_offsets[k] != c_offset and c_offsets[k] != N+1:
+                    k += 1
+                if k > kmax:
+                    kmax = k
+                for i in range(max(0, -a_offset, -c_offset), min(N-c_offset, N-a_offset, N)):
+                    c_data[k, c_offset+i] += a_data[m, a_offset+i]*b_data[n, c_offset+i]
+                c_offsets[k] = c_offset
+    return c_data[:kmax+1, :], c_offsets[:kmax+1]
+
+
+def matmul_dia(a, b):
+    c_data, c_offsets = mult_dia_core(a.data, a.offsets, b.data, b.offsets, N=a.shape[-1])
+    return dia_matrix((c_data, c_offsets), shape=a.shape)
+
+
+# @njit(error_model='numpy', fastmath=True)
 def bracket(P, W):
-    A = P@W
-    A -= W@P
+    if isspmatrix_dia(P) and isspmatrix_dia(W):
+        A = matmul_dia(P, W) 
+        A -= matmul_dia(W, P)
+    else:
+        A = P@W
+        A -= W@P
     A /= hbar(P.shape[-1])
     return A
 
@@ -30,6 +62,8 @@ def norm_L2(W):
     -------
     float
     """
+    if isspmatrix_dia(W):
+        return np.sqrt((W.data*W.data.conj()).sum().real/W.shape[-1])
     sqN = np.sqrt(W.shape[-1])
     return np.linalg.norm(W, ord='fro')/sqN
 
@@ -37,6 +71,8 @@ def norm_L2(W):
 # @njit(error_model='numpy', fastmath=True)
 def inner_L2(P, W):
     N = W.shape[-1]
+    if isspmatrix_dia(P) and isspmatrix_dia(W) and np.array_equal(W.offsets, P.offsets):
+        return (P.data*W.data.conj()).sum().real/N
     return (P*W.conj()).sum().real/N
 
 
@@ -72,6 +108,25 @@ def norm_L1(W):
     sW = np.abs(np.linalg.eigvals(W))
     sW /= W.shape[-1]
     return sW.sum()
+
+
+@njit(error_model='numpy', fastmath=True)
+def integral(W):
+    """
+    Compute the integral of `W`, which
+    is given by tr(W)/N.
+
+    Parameters
+    ----------
+    W: array
+
+    Returns
+    -------
+    float
+    """
+    trW = np.trace(W)
+    trW /= W.shape[-1]
+    return np.real(-1j*trW)
 
 
 def so3_generators(N, dtype=np.complex128):

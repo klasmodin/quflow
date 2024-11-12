@@ -1,5 +1,5 @@
 import numpy as np
-from .utils import elm2ind
+from .utils import elm2ind, complex_dtype, real_dtype
 from .laplacian.direct import compute_direct_laplacian
 from numba import njit, prange
 import os
@@ -394,19 +394,7 @@ def mat2shc_(W, basis, omega_out):
 # HIGHER LEVEL FUNCTIONS
 # ----------------------
 
-def get_corresponding_dtype(dt):
-    """
-    Return complex dtype corresponding to dt.
-    """
-    return {11: np.csingle,
-            12: np.cdouble,
-            13: np.clongdouble,
-            14: np.single,
-            15: np.double,
-            16: np.longdouble}[np.dtype(dt).num]
-
-
-def get_basis(N, allow_compute=True, dtype=np.float64):
+def get_basis(N, allow_compute=True, dtype=np.double):
     """
     Return a quantization basis for band limit N.
     The basis is obtained as follows:
@@ -480,7 +468,7 @@ def shr2mat(omega, N=-1):
     #     else:
     #         omega = omega[:N**2]
 
-    W_out = np.zeros((N, N), dtype=get_corresponding_dtype(omega.dtype))
+    W_out = np.zeros((N, N), dtype=complex_dtype(omega.dtype))
     basis = get_basis(N, omega.dtype)
     shr2mat_(omega, basis, W_out)
 
@@ -510,7 +498,7 @@ def mat2shr(W, elmax=-1):
     if elmax > 0:
         Nmax = (elmax+1)**2
 
-    omega = np.zeros(Nmax**2, dtype=get_corresponding_dtype(W.dtype))
+    omega = np.zeros(Nmax**2, dtype=real_dtype(W.dtype))
     basis = get_basis(N, dtype=omega.dtype)
     mat2shr_(W, basis, omega)
 
@@ -541,7 +529,7 @@ def shc2mat(omega, N=-1):
             omega = omega[:N**2]
 
     W_out = np.zeros((N, N), dtype=omega.dtype)
-    basis = get_basis(N, dtype=get_corresponding_dtype(W_out.dtype))
+    basis = get_basis(N, dtype=real_dtype(W_out.dtype))
     shc2mat_(omega, basis, W_out)
 
     return W_out
@@ -561,13 +549,13 @@ def mat2shc(W):
     """
     N = W.shape[0]
     omega = np.zeros(N**2, dtype=W.dtype)
-    basis = get_basis(N, dtype=get_corresponding_dtype(W.dtype))
+    basis = get_basis(N, dtype=real_dtype(W.dtype))
     mat2shc_(W, basis, omega)
 
     return omega
 
 
-def elmr2mat(el, m, N, dtype=np.float64):
+def elmr2mat(el, m, N, dtype=np.cdouble):
     """
     Return real T_elm matrix in the sparse format `diamatrix`.
     This gives a basis of u(N).
@@ -583,7 +571,7 @@ def elmr2mat(el, m, N, dtype=np.float64):
     -------
     T_elm: diamatrix, shape (N, N)
     """
-    basis = get_basis(N=N, dtype=dtype)
+    basis = get_basis(N=N, dtype=real_dtype(dtype))
     # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
     # basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
@@ -591,7 +579,7 @@ def elmr2mat(el, m, N, dtype=np.float64):
 
     bind0 = basis_break_index(absm, N)  # basis_break_indices[absm]
     bind1 = basis_break_index(absm + 1, N)  # basis_break_indices[absm+1]
-    basis_m_mat = basis[bind0:bind1].reshape((N-absm, N-absm)).astype(get_corresponding_dtype(dtype))
+    basis_m_mat = basis[bind0:bind1].reshape((N-absm, N-absm)).astype(complex_dtype(dtype))
 
     if m == 0:  # Diagonal
         diag = 1.0j*basis_m_mat[:, el]
@@ -609,10 +597,16 @@ def elmr2mat(el, m, N, dtype=np.float64):
 
         T_elm = dia_matrix((data, np.array([-absm, absm])), shape=(N, N))
 
+    # This is a hack to keep track of "pure el" dia_matrix objects.
+    # It makes the calculations of laplace and solve_poisson much faster.
+    # In the future, one should probably make a subclass
+    # of dia_matrix instead.
+    T_elm.el = el 
+
     return T_elm
 
 
-def elmc2mat(el, m, N, dtype=np.float64):
+def elmc2mat(el, m, N, dtype=np.cdouble):
     """
     Return complex T_elm matrix in the sparse format `diamatrix`.
     This gives a basis of gl(N, C).
@@ -628,7 +622,7 @@ def elmc2mat(el, m, N, dtype=np.float64):
     -------
     T_elm: diamatrix, shape (N, N)
     """
-    basis = get_basis(N=N, dtype=dtype)
+    basis = get_basis(N=N, dtype=real_dtype(dtype))
     # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
     # basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
 
@@ -636,7 +630,7 @@ def elmc2mat(el, m, N, dtype=np.float64):
 
     bind0 = basis_break_index(absm, N)  # basis_break_indices[absm]
     bind1 = basis_break_index(absm + 1, N)  # basis_break_indices[absm+1]
-    basis_m_mat = basis[bind0:bind1].reshape((N-absm, N-absm)).astype(get_corresponding_dtype(dtype))
+    basis_m_mat = basis[bind0:bind1].reshape((N-absm, N-absm)).astype(complex_dtype(dtype))
 
     data = np.zeros(N, dtype=basis_m_mat.dtype)
     if m >= 0:
@@ -646,5 +640,11 @@ def elmc2mat(el, m, N, dtype=np.float64):
     data *= 1.0j if m % 2 == 0 or m >= 0 else -1.0j
     
     T_elm = dia_matrix((data, -m), shape=(N, N))
+
+    # This is a hack to keep track of "pure el" dia_matrix objects.
+    # It makes the calculations of laplace and solve_poisson much faster.
+    # In the future, one should probably make a subclass
+    # of dia_matrix instead.
+    T_elm.el = el 
 
     return T_elm
