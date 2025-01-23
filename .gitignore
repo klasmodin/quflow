@@ -3,10 +3,11 @@ pyspherical
 .ipynb_checkpoints
 quflow/__pycache__
 .eggs
+profile_*.txt
 quflow.egg-info
 /simulations/
 /notebooks/*
-!/notebooks/basic-example.ipynb
+!/notebooks/basic-example/basic-example.ipynb
 *cpython*.pyc
 quflow.code-workspace
 /.pytest_cache
