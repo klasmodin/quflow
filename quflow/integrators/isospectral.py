@@ -437,7 +437,7 @@ def isomp_fixedpoint(W,
     vareps = dt/(2*hb)
 
     # Specify tolerance if needed
-    if not np.isscalar(tol) or tol < 0:
+    if (tol == 'auto') or (tol < 0):
         mach_eps = np.finfo(W.dtype).eps
         if not compsum:
             mach_eps = np.sqrt(mach_eps)

@@ -123,7 +123,7 @@ def profile_inner_gpu(W, repeats, repeat_correction=10):
 
 def profile_isomp(W, repeats, compsum=False):
     start_time = time.time()
-    qf.isomp_fixedpoint(W, dt=0.01, steps=repeats, minit=10, maxit=10, compsum=compsum)
+    qf.isomp_fixedpoint(W, dt=0.01*qf.hbar(W.shape[-1]), steps=repeats, minit=10, maxit=10, compsum=compsum)
     return (time.time()-start_time)/repeats
 
 
