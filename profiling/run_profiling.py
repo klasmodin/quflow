@@ -121,9 +121,9 @@ def profile_inner_gpu(W, repeats, repeat_correction=10):
     return (time.time()-start_time)/repeats
 
 
-def profile_isomp(W, repeats, compsum=True):
+def profile_isomp(W, repeats, compsum=False):
     start_time = time.time()
-    qf.isomp_fixedpoint(W, stepsize=0.01, steps=repeats, minit=10, maxit=10, compsum=compsum)
+    qf.isomp_fixedpoint(W, dt=0.01, steps=repeats, minit=10, maxit=10, compsum=compsum)
     return (time.time()-start_time)/repeats
 
 

@@ -170,7 +170,7 @@ def create_animation(filename, states, fps=25, preset='medium', extra_args=[], c
 
 def plot(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=False, title=None,
           xlabel="azimuth", ylabel="elevation", padding=None, N=None, time=None,
-          central_latitude=20, central_longitude=30, **kwargs):
+          central_latitude=20, central_longitude=30, gridargs=None, annotate=None, **kwargs):
     """
     Plot quantized functions on the sphere.
 
@@ -202,6 +202,8 @@ def plot(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fal
         Latitude orientation (in degrees) for `projections='orthographic'`.
     central_longitude: float (default 30)
         Longitude orientation (in degrees) for `projections='orthographic'`.
+    annotate: callable(ax) or None (default None)
+        Function to add annotations to the created axes `ax`. 
     kwargs:
         Arguments to send to `ax.pcolormesh(...)`.
 
@@ -296,7 +298,12 @@ def plot(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fal
     # Create the plot
     lon = np.linspace(-np.pi, np.pi, fun.shape[1], endpoint=False)
     lat = np.linspace(-np.pi/2., np.pi/2., fun.shape[0])
-    gridargs = {'color': 'black', 'alpha': 0.2}
+    default_gridargs = {'color': 'black', 'alpha': 0.2}
+    if gridargs is not None:
+        gridargs = {**default_gridargs, **gridargs}
+    else:
+        gridargs = default_gridargs
+
     if use_cartopy:
         lon *= 360/(2*np.pi)
         lat *= 360/(2*np.pi)
@@ -319,6 +326,15 @@ def plot(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fal
         ax.text(0.05, 0.95, textstr, transform=ax.transAxes, verticalalignment='top')
     if colorbar:
         im.figure.colorbar(mappable=im, cax=cax)
+
+    # add user annotation
+    if annotate is not None:
+        ax.set_autoscale_on(False)
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        annotate(ax)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
 
     return im
 
