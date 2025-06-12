@@ -36,8 +36,8 @@ def in_notebook():
 # GLOBAL VARIABLES
 # ----------------
 
-_default_qutypes = {'mat': None, 'fun': np.float32}
-_default_qutype2varname = {'mat': 'mat', 'fun': 'fun', 'shr': 'shr', 'shc': 'shc'}
+_default_qutypes = {'mat': None, 'funhalf': np.float32}
+_default_qutype2varname = {'mat': 'mat', 'fun': 'fun', 'shr': 'shr', 'shc': 'shc', 'funhalf': 'fun'}
 _pickled_argnames = ['qutypes', 'hamiltonian', 'forcing', 'integrator', 'callback', 'integrator_callback', 'strang_splitting']
 _info_args = ['info']
 
@@ -91,7 +91,7 @@ class QuSimulation(object):
         # psi = Delta^{-1}omega = [m^2/s]
         # energy = omega psi dx = [m^4/s^2]
         # enstrophy = omega^2 dx = [m^2/s^2]
-        # \sqrt{energy}/enstrophy = [s]
+        # sqrt{energy}/enstrophy = [s]
 
         Parameters
         ----------
@@ -116,6 +116,9 @@ class QuSimulation(object):
                 self.qutypes = _default_qutypes
             else:
                 self.qutypes = qutypes
+            
+            if 'fun' in self.qutypes and 'funhalf' in self.qutypes:
+                raise ValueError("Cannot have both fun and funhalf outputs.")
 
             # Create or overwrite file
             with h5py.File(self.filename, "w") as f:
@@ -241,7 +244,7 @@ class QuSimulation(object):
                     omegac.append(mat2shc(Wi))
                 omegac = np.squeeze(np.array(omegac))
                 arr = omegac.astype(dtype)
-            elif qutype == 'fun':
+            elif qutype == 'fun' or qutype == 'funhalf':
                 if isreal:
                     try:
                         omega = omegar
@@ -263,6 +266,8 @@ class QuSimulation(object):
                 arr = []
                 for omegai in omega.reshape((-1, omega.shape[-1])):
                     sh2fun = shr2fun if isreal else shc2fun
+                    if qutype == 'funhalf':
+                        omegai = omegai[...,:(N//2)**2]
                     arr.append(sh2fun(omegai))
                 arr = np.squeeze(np.array(arr, dtype=dtype))
 
