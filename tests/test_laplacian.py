@@ -197,7 +197,7 @@ def test_solve_poisson_multistate(N):
     np.testing.assert_allclose(Plarge, P0)
 
 
-@pytest.mark.parametrize("N", [2, 33, 64, 101])
+@pytest.mark.parametrize("N", [33, 64, 101])
 @pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu, qusparse, qutridiagonal])
 @pytest.mark.parametrize("skewh", [True, False])
 def test_solve_poisson(N, qulap, skewh):

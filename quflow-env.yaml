@@ -2,7 +2,7 @@ name: quflow
 channels:
   - conda-forge
 dependencies:
-  - python=3.11
+  - python
   - pip
   - numpy
   - scipy
@@ -17,6 +17,7 @@ dependencies:
   - ipywidgets
   - tqdm
   - prettytable
+  - fftw
+  - ducc0
   - pip:
-    - pyssht
     - https://github.com/klasmodin/quflow/archive/master.zip

@@ -2,6 +2,7 @@ import numpy as np
 from numba import njit, prange
 import scipy.sparse as sp
 from scipy.sparse import isspmatrix_dia
+from ..geometry import cartesian_generators
 
 # ----------------
 # GLOBAL VARIABLES
@@ -11,6 +12,7 @@ _cpu_laplacian_cache = dict()
 _cpu_buffer_cache = dict()
 _cpu_heat_cache = dict()
 _cpu_helmholtz_cache = dict()
+_cpu_globalqg_cache = dict()
 _cpu_viscdamp_cache = dict()
 _cpu_cache = dict()
 
@@ -619,7 +621,9 @@ def select_sum(W):
 
 def solve_poisson(W, reduce=select_first):
     """
-    Return stream matrix `P` for `W`.
+    Solve the Poisson equation
+        ΔP = W
+    i.e. return the stream matrix `P` for `W`.
 
     Parameters
     ----------
@@ -757,6 +761,57 @@ def solve_helmholtz(W, alpha=1.0):
 
     P = _cpu_buffer_cache[N]['P']
     solve_cpu_(helmholtz, W, P,
+               _cpu_buffer_cache[N]['float'],
+               _cpu_buffer_cache[N]['complex'])
+
+    return P
+
+
+def solve_globalqg(W, gamma=1.0):
+    """
+    Solve the inhomogeneous Helmholtz equation
+        ΔP + gamma * Z @ P @ Z = W
+
+    Parameters
+    ----------
+    gamma: float
+    W: ndarray(shape=(N, N), dtype=complex)
+
+    Returns
+    -------
+    P: ndarray(shape=(N, N), dtype=complex)
+    """
+    global _cpu_globalqg_cache
+
+    N = W.shape[0]
+
+    if (N, gamma) not in _cpu_globalqg_cache:
+
+        # Get cpu laplacian
+        lap = laplacian(N, bc=False, dtype=type(W[0, 0].real))
+
+        # Allocate buffer
+        allocate_buffer(W)
+
+        # Get cpu operator
+        globalqg = lap.copy()
+        zvec = np.diag(cartesian_generators(W.shape[-1], dtype=W.dtype)[-1]).imag
+        # globalqg[:, :, :] = 0.0
+        globalqg[:, :, 0] -= (gamma/2.0)*zvec**2
+        globalqg[:, :, 0] -= (gamma/2.0)*zvec[:, np.newaxis]**2
+        # for i in range(W.shape[-1]):
+        #     globalqg[i, :, 0] *= zvec
+        # for i in range(W.shape[-1]):
+        #     globalqg[:, i, 0] *= zvec
+        # globalqg += lap
+
+        # Store in cache
+        _cpu_globalqg_cache[(N, gamma)] = globalqg
+    else:
+        globalqg = _cpu_globalqg_cache[(N, gamma)]
+
+    P = _cpu_buffer_cache[N]['P']
+    solve_cpu_(globalqg, W, P,
                _cpu_buffer_cache[N]['float'],
                _cpu_buffer_cache[N]['complex'])
 

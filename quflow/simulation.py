@@ -83,7 +83,7 @@ class QuSimulation(object):
                  loggers: dict = None,
                  state: np.ndarray = None,
                  time=None,
-                 **kwargs):
+                 **kwargs): 
         """
 
         # v [m/s]

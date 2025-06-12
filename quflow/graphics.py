@@ -404,7 +404,7 @@ def create_animation(filename, states, N=None, fps=25, preset='medium', extra_ar
         if 'dpi' not in kwargs:
             kwargs['dpi'] = 100  # Default resolution
 
-        im = plot2(f0, **kwargs)
+        im = plot(f0, **kwargs)
 
         if time is not None:
             ax = im.axes

@@ -1,6 +1,187 @@
 import numpy as np
-import pyssht
-from .utils import elm2ind
+from numba import njit, prange
+
+try:
+    from pyssht import ind2elm, forward, inverse
+except ModuleNotFoundError:
+    import ducc0
+
+    def _get_theta(L: int, Method: str='MW'):
+        if Method == 'MW' or Method == 'MW_pole':
+            return np.pi*(2.*np.arange(L)+1) / ( 2.0 * float(L) - 1.0 )
+                
+        if Method == 'MWSS':
+            return np.pi*np.arange(L+1)/float(L)
+
+        if Method == 'DH':
+            return np.pi*(2*np.arange(2*L)+1.) / ( 4.0 * float(L) )
+            
+        if Method == 'GL':
+            return ducc0.misc.GL_thetas(L)
+
+    @njit
+    def _nalm(lmax: int, mmax:int):
+        return ((mmax + 1) * (mmax + 2)) // 2 + (mmax + 1) * (lmax - mmax)
+
+    @njit
+    def _get_lidx(L: int):
+        res = np.arange(L)
+        return res*(res+1)
+
+    @njit
+    def _extract_real_alm(flm, L: int):
+        res = np.empty((_nalm(L-1, L-1),), dtype=np.complex128)
+        myres = res.ravel()
+        myflm = flm.ravel()
+        ofs=0
+        mylidx = _get_lidx(L)
+        for m in range(L):
+            for i in range(m,L):
+                myres[ofs-m+i] = myflm[mylidx[i]+m]
+            ofs += L-m
+        return res
+
+    @njit
+    def _build_real_flm(alm, L: int):
+        res = np.empty((L*L), dtype=np.complex128)
+        ofs=0
+        myres=res.ravel()
+        myalm=alm.ravel()
+        lidx = _get_lidx(L)
+        for m in range(L):
+            mfac = (-1)**m
+            for i in range(m,L):
+                myres[lidx[i]+m] = myalm[ofs-m+i]
+                myres[lidx[i]-m] = mfac*(myalm[ofs-m+i].real - 1j*myalm[ofs-m+i].imag)
+            ofs += L-m
+        return res
+
+    @njit
+    def _extract_complex_alm(flm, L: int, Spin: int):
+        res = np.empty((2, _nalm(L-1, L-1),), dtype=np.complex128)
+        ofs=0
+        sfac=(-1)**abs(Spin)
+        # myres=res.ravel()
+        myres=res
+        myflm=flm.ravel()
+        lidx = _get_lidx(L)
+        if Spin >= 0:
+            for m in range(L):
+                mfac = (-1)**m
+                for i in range(m,L):
+                    fp = myflm[lidx[i]+m]
+                    fm = mfac * (myflm[lidx[i]-m].real - 1j*myflm[lidx[i]-m].imag)
+                    myres[0, ofs-m+i] = 0.5*(fp+fm)
+                    myres[1, ofs-m+i] = -0.5j*(fp-fm)
+                ofs += L-m
+        else:
+            for m in range(L):
+                mfac = (-1)**m
+                for i in range(m,L):
+                    fp = mfac*sfac*(myflm[lidx[i]-m].real - 1j*myflm[lidx[i]-m].imag)
+                    fm = sfac*myflm[lidx[i]+m]
+                    myres[0, ofs-m+i] = 0.5*(fp+fm)
+                    myres[1, ofs-m+i] = -0.5j*(fp-fm)
+                ofs += L-m
+        return res
+
+    @njit
+    def _build_complex_flm(alm, L: int, Spin: int):
+        res = np.empty((L*L), dtype=np.complex128)
+        ofs=0
+        myres=res.ravel()
+        myalm=np.reshape(alm, (2, _nalm(L-1, L-1),))
+        lidx = _get_lidx(L)
+        sfac=(-1)**abs(Spin)
+        if Spin >= 0:
+            for m in range(L):
+                mfac = (-1)**m
+                for i in range(m,L):
+                    fp = myalm[0, ofs-m+i] + 1j*myalm[1, ofs-m+i]
+                    fm = myalm[0, ofs-m+i] - 1j*myalm[1, ofs-m+i]
+                    myres[lidx[i]+m] = fp
+                    myres[lidx[i]-m] = mfac*(fm.real - 1j*fm.imag)
+                ofs += L-m
+        else:
+            for m in range(L):
+                mfac = (-1)**m
+                for i in range(m,L):
+                    fp = myalm[0, ofs-m+i] + 1j*myalm[1, ofs-m+i]
+                    fm = myalm[0, ofs-m+i] - 1j*myalm[1, ofs-m+i]
+                    myres[lidx[i]+m] = sfac*fm
+                    myres[lidx[i]-m] = sfac*mfac*(fp.real -1j *fp.imag)
+                ofs += L-m
+        return res
+
+    def forward(f, L, Spin=0, Method='MW', Reality=False, nthreads: int=0):
+        gdict = {"DH":"F1", "MW":"MW", "MWSS":"CC", "GL":"GL"}
+        theta = _get_theta(L, Method)
+        ntheta = theta.shape[0]
+        if ntheta != f.shape[0]:
+            raise RuntimeError("ntheta mismatch")
+        nphi = f.shape[1]
+        if Reality:
+            return _build_real_flm(ducc0.sht.experimental.analysis_2d(
+                map=f.reshape((-1,f.shape[0],f.shape[1])),
+                lmax=L-1,
+                nthreads=nthreads,
+                spin=0,
+                geometry=gdict[Method])[0], L)
+        elif Spin == 0:
+            flmr = forward(f.real, L, Spin, Method, True)
+            flmi = forward(f.imag, L, Spin, Method, True)
+            alm = np.empty((2,_nalm(L-1, L-1)), dtype=np.complex128)
+            alm[0] = _extract_real_alm(flmr, L)
+            alm[1] = _extract_real_alm(flmi, L)
+            return _build_complex_flm(alm, L, 0)
+        else:
+            map = f.astype(np.complex128).view(dtype=np.float64).reshape((f.shape[0],f.shape[1],2)).transpose((2,0,1))
+            if Spin < 0:
+                map[1]*=-1
+            res = _build_complex_flm(ducc0.sht.experimental.analysis_2d(
+                map=map,
+                lmax=L-1,
+                nthreads=nthreads,
+                spin=abs(Spin),
+                geometry=gdict[Method]), L, Spin)
+            res *= -1
+            return res
+
+    def inverse(flm: np.ndarray, L: int, Spin: int=0, Method: str='MW', Reality: bool=False, nthreads: int=0):
+        gdict = {"DH":"F1", "MW":"MW", "MWSS":"CC", "GL":"GL"}
+        theta = _get_theta(L, Method)
+        ntheta = theta.shape[0]
+        nphi = 2*L-1
+        if Method == 'MWSS':
+            nphi += 1
+        if Reality:
+            return ducc0.sht.experimental.synthesis_2d(
+                alm=_extract_real_alm(flm, L).reshape((1,-1)),
+                ntheta=ntheta,
+                nphi=nphi,
+                lmax=L-1,
+                nthreads=nthreads,
+                spin=0,
+                geometry=gdict[Method])[0]
+        elif Spin == 0:
+            alm = _extract_complex_alm(flm, L,0)
+            flmr = _build_real_flm(alm[0], L)
+            flmi = _build_real_flm(alm[1], L)
+            return inverse(flmr, L, 0, Method, True) + 1j*inverse(flmi, L, 0, Method, True)
+        else:
+            tmp=ducc0.sht.experimental.synthesis_2d(
+                alm=_extract_complex_alm(flm, L, Spin),
+                ntheta=ntheta,
+                nphi=nphi,
+                lmax=L-1,
+                nthreads=nthreads,
+                spin=abs(Spin),
+                geometry=gdict[Method])
+            res = -1j*tmp[1] if Spin >=0 else 1j*tmp[1]
+            res -= tmp[0]
+            return res
+
+from .utils import elm2ind, ind2elm
 from .quantization import mat2shr, mat2shc
 
 
@@ -29,7 +210,7 @@ def fun2shc(f):
         f = f.astype(scalar_type)
 
     # Transform to spherical harmonics
-    omega = pyssht.forward(f, N, Reality=True if np.isrealobj(f) else False)
+    omega = forward(f, N, Reality=True if np.isrealobj(f) else False)
     omega /= np.sqrt(4*np.pi)
 
     return omega
@@ -62,7 +243,7 @@ def shc2fun(omega, isreal=False, N=-1):
 
     if N == -1:
         # Compute bandwidth
-        N = pyssht.ind2elm(omega.shape[0] - 1)[0] + 1
+        N = ind2elm(omega.shape[0] - 1)[0] + 1
     else:
         # Extend or trim omega
         if omega.shape[0] < N**2:
@@ -74,7 +255,7 @@ def shc2fun(omega, isreal=False, N=-1):
     assert omega.shape[0] == N**2, "It seems that omega does not have the right length."
 
     # Transform to function values
-    f = pyssht.inverse(omega, N, Reality=isreal)
+    f = inverse(omega, N, Reality=isreal)
     f *= np.sqrt(4*np.pi)
 
     return f
@@ -161,7 +342,7 @@ def shr2shc(omega_real):
     return omega_complex
 
 
-def fun2img(f, lim=np.infty):
+def fun2img(f, lim=np.inf):
     """
     Convert a 2D float array to an 8-bit image.
     Unless given, limits are taken so that the value 128 correspond to 0.0.
@@ -178,7 +359,7 @@ def fun2img(f, lim=np.infty):
     img: ndarray(dtype=uint8)
     """
     if not isinstance(lim, tuple):
-        if lim == np.infty:
+        if lim == np.inf:
             lim = np.abs(f).max()
         lim = (-lim, lim)
 

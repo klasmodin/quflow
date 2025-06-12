@@ -458,6 +458,7 @@ def isomp_fixedpoint(W,
         t_compsum = np.zeros_like(W)
         delta_compsum = np.zeros_like(W)
 
+
     # --- Beginning of step loop ---
     for k in range(steps):
 
