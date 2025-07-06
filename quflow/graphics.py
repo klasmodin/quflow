@@ -381,6 +381,8 @@ def create_animation(filename, states, N=None, fps=25, preset='medium', extra_ar
         if '-b:v' not in extra_args:
             extra_args += ['-b:v', '1500K']
     elif preset == "high":
+        if '-b:v' not in extra_args:
+            extra_args += ['-b:v', '8000K']
         if '-preset' not in extra_args and codec == 'h264':
             extra_args += ['-preset', 'veryslow']
     elif preset == "twopass":

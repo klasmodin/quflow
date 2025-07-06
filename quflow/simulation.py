@@ -433,8 +433,8 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-f", "--filename", help="Simfile name", type=str, default="{}") 
-# parser.add_argument("-a", "--animate", help="Animate results.", action="store_true")
-# parser.add_argument("-s", "--simulate", help="Simulate.", action="store_true")
+parser.add_argument("-a", "--animate", help="Only create animation.", action="store_true")
+parser.add_argument("-s", "--simulate", help="Only simulate.", action="store_true")
 parser.add_argument("-t", "--simtime", help="Total simulation time.", type=float)
 args = parser.parse_args()
 
@@ -453,10 +453,12 @@ if args.simtime is not None:
     mysim['simtime'] = np.float64(args.simtime)
 
 # Run simulation
-qf.solve(mysim)
+if not args.animate:
+    qf.solve(mysim)
 
 # Create animation
-qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'])
+if not args.simulate:
+    qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'])
 
 """.format(sim.filename, sim['prerun'])
     
@@ -470,6 +472,7 @@ qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'])
 
 def solve(W, stepsize=None, dt=None,
           steps=None, simtime=None,
+          endtime=None,
           inner_steps=None, inner_time=None,
           integrator=None,
           callback=None, callback_kwargs=None,
@@ -490,9 +493,13 @@ def solve(W, stepsize=None, dt=None,
         Not used when `dt` is specified.
     steps: None or int
         Total number of steps to take.
+        Only one of `steps`, `simtime`, or `endtime` should be specified.
     simtime: None or float
         Total simulation time in seconds.
-        Not used when `steps` is specified.
+        Only one of `steps`, `simtime`, or `endtime` should be specified.
+    endtime: None or float
+        End simulation time in seconds.
+        Only one of `steps`, `simtime`, or `endtime` should be specified.
     inner_steps: None or int
         Number of steps taken between each callback.
     inner_time: None or float
@@ -581,8 +588,12 @@ def solve(W, stepsize=None, dt=None,
         integrator_kwargs['callback'] = integrator_callback
 
     # Determine steps
-    if np.array([0 if x is None else 1 for x in [steps, simtime]]).sum() != 1:
-        raise ValueError("One, and only one, of steps or simtime should be specified.")
+    if np.array([0 if x is None else 1 for x in [steps, simtime, endtime]]).sum() != 1:
+        raise ValueError("One, and only one, of `steps`, `simtime`, or `endtime` should be specified.")
+    if endtime is not None:
+        if endtime < time:
+            raise ValueError("Specified `endtime`={} is smaller than current `time`={}.".format(endtime, time))
+        simtime = endtime - time
     if simtime is not None:
         # qtime = seconds2qtime(simtime, N)
         # steps = round(qtime / np.abs(stepsize))
