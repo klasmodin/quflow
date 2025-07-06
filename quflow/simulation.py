@@ -436,6 +436,7 @@ parser.add_argument("-f", "--filename", help="Simfile name", type=str, default="
 parser.add_argument("-a", "--animate", help="Only create animation.", action="store_true")
 parser.add_argument("-s", "--simulate", help="Only simulate.", action="store_true")
 parser.add_argument("-t", "--simtime", help="Total simulation time.", type=float)
+parser.add_argument("--endtime", help="End simulation time.", type=float)
 args = parser.parse_args()
 
 filename = args.filename
@@ -451,6 +452,9 @@ mysim = qf.QuSimulation(filename)
 
 if args.simtime is not None:
     mysim['simtime'] = np.float64(args.simtime)
+
+if args.endtime is not None:
+    mysim['endtime'] = np.float64(args.endtime)
 
 # Run simulation
 if not args.animate:
@@ -545,6 +549,8 @@ def solve(W, stepsize=None, dt=None,
                 steps = value
             elif name == 'simtime' and simtime is None:
                 simtime = value
+            elif name == 'endtime' and endtime is None:
+                endtime = value
             elif name == 'inner_steps' and inner_steps is None:
                 inner_steps = value
             elif name == 'inner_time' and inner_time is None:
