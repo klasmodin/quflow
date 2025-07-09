@@ -134,7 +134,7 @@ def test_solve(W, tmpdir):
 
     sim = QuSimulation(filename, overwrite=True,  state=W, loggers={'normL2': qf.geometry.norm_L2})
 
-    qf.simulation.solve(W, stepsize=0.1, steps=100, inner_steps=10, progress_bar=False, callback=sim)
+    qf.simulation.solve(W, stepsize=0.1, steps=100, steps_out=10, progress_bar=False, callback=sim)
 
     # print(sim['time'])
     # print(sim['step'])
@@ -151,16 +151,16 @@ def test_solve_restart(W, tmpdir):
 
     sim = QuSimulation(filename, overwrite=True,  state=W)
 
-    qf.simulation.solve(W.copy(), stepsize=0.1, steps=50, inner_steps=10, progress_bar=False, callback=sim)
+    qf.simulation.solve(W.copy(), stepsize=0.1, steps=50, steps_out=10, progress_bar=False, callback=sim)
 
     sim2 = QuSimulation(filename)
 
-    qf.simulation.solve(sim2['mat', -1], stepsize=0.1, steps=50, inner_steps=10, progress_bar=False, callback=sim)
+    qf.simulation.solve(sim2['mat', -1], stepsize=0.1, steps=50, steps_out=10, progress_bar=False, callback=sim)
 
     filename3 = tmpdir.join("testsim3.hdf5")
     sim3 = QuSimulation(filename3, overwrite=True,  state=W)
 
-    qf.simulation.solve(W.copy(), stepsize=0.1, steps=100, inner_steps=10, progress_bar=False, callback=sim3)
+    qf.simulation.solve(W.copy(), stepsize=0.1, steps=100, steps_out=10, progress_bar=False, callback=sim3)
 
     np.testing.assert_allclose(qf.qtime2seconds(1.0, N=N)*np.arange(11), sim['time'])
     np.testing.assert_equal(10*np.arange(11), sim['step'])
