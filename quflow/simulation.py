@@ -477,7 +477,7 @@ if not args.simulate:
 def solve(W, stepsize=None, dt=None,
           steps=None, simtime=None,
           endtime=None,
-          inner_steps=None, inner_time=None,
+          steps_out=None, dt_out=None,
           integrator=None,
           callback=None, callback_kwargs=None,
           integrator_callback=None,
@@ -506,12 +506,19 @@ def solve(W, stepsize=None, dt=None,
         Only one of `steps`, `simtime`, or `endtime` should be specified.
     inner_steps: None or int
         Number of steps taken between each callback.
+        Deprecated: use `steps_out` instead.
+    steps_out: None or int
+        Number of steps taken between each callback.
     inner_time: None or float
         Approximate time in seconds between each callback.
         Not used when `inner_steps` is specified.
+        Deprecated: use `dt_out` instead.
+    dt_out: None or float
+        Approximate time in seconds between each callback.
+        Not used when `steps_out` is specified.
     integrator: callable(W, stepsize, steps, **kwargs)
         Integration method to carry out the steps.
-    callback: callable(W, inner_steps, inner_time, **callback_kwargs)
+    callback: callable(W, steps_out, dt_out, **callback_kwargs)
         The callback function evaluated every outer step.
         It uses **callback_kwargs as extra keyword arguments.
         It is not evaluated at the initial time.
@@ -551,10 +558,14 @@ def solve(W, stepsize=None, dt=None,
                 simtime = value
             elif name == 'endtime' and endtime is None:
                 endtime = value
-            elif name == 'inner_steps' and inner_steps is None:
-                inner_steps = value
-            elif name == 'inner_time' and inner_time is None:
-                inner_time = value
+            elif name == 'steps_out' and steps_out is None:
+                steps_out = value
+            elif name == 'inner_steps' and steps_out is None:
+                steps_out = value
+            elif name == 'dt_out' and dt_out is None:
+                dt_out = value
+            elif name == 'inner_time' and dt_out is None:
+                dt_out = value
             elif name == 'integrator' and integrator is None:
                 integrator = value
             elif (name == 'integrator_callback' or name == 'callback') and integrator_callback is None:
@@ -610,16 +621,16 @@ def solve(W, stepsize=None, dt=None,
         callback_kwargs = dict()
 
     # Determine inner_steps
-    if np.array([0 if x is None else 1 for x in [inner_steps, inner_time]]).sum() == 0:
-        inner_steps = 100  # Default value of inner_steps
-    elif inner_steps is None:
-        if inner_time is not None:
+    if np.array([0 if x is None else 1 for x in [steps_out, dt_out]]).sum() == 0:
+        steps_out = 100  # Default value of inner_steps
+    elif steps_out is None:
+        if dt_out is not None:
             # inner_steps = round(seconds2qtime(inner_time, N) / np.abs(stepsize))
-            inner_steps = round(inner_time / np.abs(dt))
+            steps_out = round(dt_out / np.abs(dt))
 
     # Check if inner_steps is too large
-    if inner_steps > steps:
-        inner_steps = steps
+    if steps_out > steps:
+        steps_out = steps
 
     # Create progressbar
     if progress_bar:
@@ -640,12 +651,12 @@ def solve(W, stepsize=None, dt=None,
             progress_bar = False
 
     # Main simulation loop
-    for k in range(0, steps, inner_steps):
+    for k in range(0, steps, steps_out):
 
-        if k+inner_steps > steps:
+        if k+steps_out > steps:
             no_steps = steps-k
         else:
-            no_steps = inner_steps
+            no_steps = steps_out
         W = integrator(W, dt, steps=no_steps, **integrator_kwargs)
         # delta_time = qtime2seconds(no_steps*stepsize, N=N)
         delta_time = no_steps*dt
