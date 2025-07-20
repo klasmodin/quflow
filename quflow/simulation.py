@@ -13,6 +13,7 @@ from .laplacian import solve_poisson
 from .integrators import isomp
 from .utils import elm2ind
 from .geometry import hbar
+import warnings
 
 
 # from quflow import solve_poisson
@@ -606,7 +607,7 @@ def solve(W, stepsize=None, dt=None,
 
     # Determine steps
     if np.array([0 if x is None else 1 for x in [steps, simtime, endtime]]).sum() != 1:
-        raise ValueError("One, and only one, of `steps`, `simtime`, or `endtime` should be specified.")
+        warnings.warn("One, and only one, of `steps`, `simtime`, or `endtime` should be specified.")
     if endtime is not None:
         if endtime < time:
             raise ValueError("Specified `endtime`={} is smaller than current `time`={}.".format(endtime, time))
