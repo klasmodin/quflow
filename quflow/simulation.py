@@ -108,6 +108,7 @@ class QuSimulation(object):
         self.datapath = datapath
         self.fieldnames = dict()
         self.loggers = loggers if loggers is not None else dict()
+        self._isopen = False
 
         if not os.path.exists(filename) or overwrite:
             if state is None:
@@ -122,7 +123,9 @@ class QuSimulation(object):
                 raise ValueError("Cannot have both fun and funhalf outputs.")
 
             # Create or overwrite file
-            with h5py.File(self.filename, "w") as f:
+            try:
+                f = self._open("w")
+            # with h5py.File(self.filename, "w") as f:
                 if self.datapath != "/":
                     f.create_group(self.datapath)
                 f[self.datapath].attrs["version"] = __version__
@@ -136,12 +139,16 @@ class QuSimulation(object):
                     f[self.datapath].attrs['loggers'] = np.array([myp])
                 self.args_datapath = self.datapath + "args/"
                 f.create_group(self.args_datapath)
+            finally:
+                self._close()
 
             # Add fields
             self.initialize_field(W=state, time=time if time is not None else 0.0, **kwargs)
 
         else:
-            with h5py.File(self.filename, "r") as f:
+            try:
+                f = self._open("r")
+            # with h5py.File(self.filename, "r") as f:
                 # if "prerun" in f[self.datapath].attrs:
                     # exec(f[self.datapath].attrs["prerun"], globals())
                 self.qutypes = pickle.loads(f[self.datapath].attrs["qutypes"][0])
@@ -152,29 +159,76 @@ class QuSimulation(object):
                 self.args_datapath = self.datapath + "args/"
                 if qutypes is not None:
                     raise ValueError(self.filename + " has already been initialized with qutypes.")
-        
+            finally:
+                self._close()
         # Update fieldnames
         self._update_fieldnames()
 
+
+    def _open(self, mode="r"):
+        "Open HDF5 file."
+        if not self._isopen:
+            self._hdf5file = h5py.File(self.filename, mode)
+            self._isopen = True
+        elif mode != "r" and self._hdf5file.mode == "r":
+            self._close()
+            return self._open(mode)
+        return self._hdf5file
+    
+
+    def _close(self):
+        "Close HDF5 file."
+        if self._isopen:
+            self._hdf5file.close()
+            self._isopen = False
+
+
+    def __enter__(self):
+        self._open("r")
+        return self
+
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._close()
+        if exc_type:
+            print(f'Exception type: {exc_type}')
+            print(f'Exception value: {exc_value}')
+        # Return False to propagate the exception, True to suppress it
+        return False    
+
+
     def __setitem__(self, name, value):
-        with h5py.File(self.filename, "r+") as f:
+        try:
+            f = self._open("r+")
+        # with h5py.File(self.filename, "r+") as f:
             if name in _pickled_argnames:
-                try:
-                    myp = pickle.dumps(value)
-                except AttributeError:
-                    myp = value.__name__
-                    f[self.args_datapath].attrs[name] = myp
+                if value is None:
+                    f[self.args_datapath].attrs.pop(name)
                 else:
-                    f[self.args_datapath].attrs[name] = np.array([myp])
+                    try:
+                        myp = pickle.dumps(value)
+                    except AttributeError:
+                        myp = value.__name__
+                        f[self.args_datapath].attrs[name] = myp
+                    else:
+                        f[self.args_datapath].attrs[name] = np.array([myp])
             elif name == "prerun":
                 prerun = "\n".join([l for l in value.strip().split("\n") if "In[" not in l])
                 f[self.datapath].attrs[name] = prerun
                 value = prerun
                 # exec(prerun, globals())
             elif name in _info_args:
-                f[self.datapath].attrs[name] = value
+                if value is None:
+                    f[self.datapath].attrs.pop(name)
+                else:    
+                    f[self.datapath].attrs[name] = value
             else:
-                f[self.args_datapath].attrs[name] = value
+                if value is None:
+                    f[self.args_datapath].attrs.pop(name)
+                else:    
+                    f[self.args_datapath].attrs[name] = value
+        finally:
+            self._close()
 
     def __getitem__(self, name):
         ind = None
@@ -189,7 +243,9 @@ class QuSimulation(object):
             # Assume it is an index
             ind = name 
             name = "mat"
-        with h5py.File(self.filename, 'r') as f:
+        try:
+            f = self._open("r")
+        # with h5py.File(self.filename, 'r') as f:
             if self.datapath + name in f:
                 if ind is not None:
                     value = f[self.datapath + name][ind]
@@ -212,12 +268,18 @@ class QuSimulation(object):
                     value = f[self.datapath].attrs[name]
             else:
                 raise KeyError("There is no dataset or attribute '{}'.".format(name))
+        finally:
+            self._close()
         return value
     
     def args(self):
-        with h5py.File(self.filename, 'r') as f:
+        try:
+            f = self._open("r")
+        # with h5py.File(self.filename, 'r') as f:
             for name in f[self.args_datapath].attrs:
                 yield name, self[name]
+        finally:
+            self._close()
 
     def qutypes_iterator(self, W, qutype2varname=None):
         N = W.shape[-1]
@@ -275,18 +337,23 @@ class QuSimulation(object):
             yield qutype2varname[qutype], arr, qutype
 
     def _update_fieldnames(self):
-        with h5py.File(self.filename, 'r') as f:
+        try:
+            f = self._open("r")
+        # with h5py.File(self.filename, 'r') as f:
             for name in f[self.datapath].keys():
                 dataset = f[self.datapath + name]
                 if isinstance(dataset, h5py.Dataset):
                     self.fieldnames.update({name: (dataset.shape, dataset.dtype)})
+        finally:
+            self._close()
 
     def initialize_field(self, W, time=0.0, **kwargs):
         try:
-            f = h5py.File(self.filename, "r+")
-        except IOError:
-            raise IOError("Error while trying to write to file {}.".format(self.filename))
-        else:
+            f = self._open("r+")
+        #     f = h5py.File(self.filename, "r+")
+        # except IOError:
+        #     raise IOError("Error while trying to write to file {}.".format(self.filename))
+        # else:
             if W is not None:
                 N = W.shape[-1]
 
@@ -354,7 +421,7 @@ class QuSimulation(object):
                 varset[0, ...] = arr
 
         finally:
-            f.close()
+            self._close()
 
     def __call__(self, W, delta_time, delta_steps=1, **kwargs):
         """
@@ -366,7 +433,9 @@ class QuSimulation(object):
         delta_steps: int
         kwargs: other variables to save
         """
-        with h5py.File(self.filename, "r+") as f:
+        try:
+            f = self._open("r+")
+        # with h5py.File(self.filename, "r+") as f:
 
             # Update state sets
             for varname, arr, qutype in self.qutypes_iterator(W):
@@ -397,6 +466,9 @@ class QuSimulation(object):
                 varset.resize(varset.shape[0]+1, axis=0)
                 value = logger(W)
                 varset[-1, ...] = value
+        
+        finally:
+            self._close()
 
 
 # -------------------------

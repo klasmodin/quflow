@@ -6,6 +6,8 @@ from matplotlib.pyplot import subplots
 from mpl_toolkits.axes_grid1 import ImageGrid
 import matplotlib.animation as anim
 from matplotlib.colors import hsv_to_rgb
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from scipy.ndimage import map_coordinates
 
 try:
     import cartopy.crs as ccrs
@@ -41,10 +43,18 @@ def resample(data, N):
     omega with new resolution
     """
     if data.ndim == 2:
-        if data.shape[0] == data.shape[1]:
+        if np.iscomplexobj(data) and data.shape[0] == data.shape[1]: # Assume mat
             omega = mat2shr(data)
+        elif np.isrealobj(data) and 2*data.shape[0]-1 == data.shape[1]: # Assume fun
+            if data.shape[0] == N:
+                # We don't do anything
+                return data
+            X, Y = np.meshgrid(np.linspace(0, data.shape[0]-1, N, endpoint=True), 
+                        np.linspace(0, data.shape[1], 2*N-1, endpoint=False), indexing='ij')
+            fun_resampled = map_coordinates(data, np.array([X, Y]), order=1, mode='reflect')
+            return fun_resampled
         else:
-            raise NotImplementedError("Resampling fun data is not supported yet.")
+            raise NotImplementedError("Resampling this data is not supported yet.")
     elif data.ndim == 1:
         omega = data
     omega2 = np.zeros(N**2, dtype=omega.dtype)
@@ -52,123 +62,7 @@ def resample(data, N):
     return omega2
 
 
-def create_animation(filename, states, fps=25, preset='medium', extra_args=[], codec='h264',
-                     title='quflow simulation',
-                     scale=None, N=None, **kwargs):
-    """
-
-    Parameters
-    ----------
-    filename
-    states
-    fps
-    preset
-    extra_args
-    codec: str (default:'h264')
-        ffmpeg codec. For accelerated Apple encoder, use 'h264_videotoolbox'
-    title
-    scale
-    N: int or None (default None)
-        Up- or downsample to resolution N in plot.
-    kwargs
-
-    Returns
-    -------
-
-    """
-
-    FFMpegWriter = anim.writers['ffmpeg']
-    metadata = dict(title=title, artist='Matplotlib', comment='http://github.com/klasmodin/quflow')
-    extra_args = []
-
-    if preset == 'medium':
-        if '-b:v' not in extra_args:
-            extra_args += ['-b:v', '3000K']
-        if '-preset' not in extra_args and codec == 'h264':
-            extra_args += ['-preset', 'veryslow']
-        if scale is None:
-            scale = 1
-    elif preset == "low":
-        if '-b:v' not in extra_args:
-            extra_args += ['-b:v', '1500K']
-        if scale is None:
-            scale = 0.5
-    elif preset == "high":
-        if '-preset' not in extra_args and codec == 'h264':
-            extra_args += ['-preset', 'veryslow']
-
-    # Make sure some scale is selected
-    if scale is None:
-        scale = 1
-
-    # Create ffmpeg writer
-    writer = FFMpegWriter(fps=fps, metadata=metadata, codec=codec, extra_args=extra_args)
-
-    dpi = 100
-
-    if N is not None:
-        omega = resample(states[0], N)
-    else:
-        omega = states[0]
-    f0 = as_fun(omega)
-    figsize = (f0.shape[1]/float(dpi), f0.shape[0]/float(dpi))
-
-    with matplotlib.rc_context({'backend': 'Agg'}):
-        fig = plt.figure(figsize=figsize)
-        ax = fig.add_axes([0, 0, 1, 1])
-
-        # Hide spines, ticks, etc.
-        ax.axis('off')
-
-        im = plot(f0, ax=ax, colorbar=False, **kwargs) #, interpolation='nearest')
-        ax.set_frame_on(False)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_xlabel(None)
-        ax.set_ylabel(None)
-
-        print("Writing file {}".format(filename))
-        with writer.saving(fig, filename, dpi=dpi*scale):
-            ndots = 40
-            print("_"*min(ndots, states.shape[0]))
-            for k in range(states.shape[0]):
-                if N is not None:
-                    omega = resample(states[k], N)
-                else:
-                    omega = states[k]
-                fun = as_fun(omega)
-                # TODO: insert code here for saving img if state file is writable
-                if hasattr(im, 'set_data'):
-                    im.set_data(fun)
-                elif hasattr(im, 'set_array'):
-                    im.set_array(fun)
-                else:
-                    raise NotImplementedError("Could not find method for setting data.")
-                writer.grab_frame()
-                if k % (max(states.shape[0], ndots)//ndots) == 0:
-                    print("*", end='')
-            print("")
-        # Close figure (so it doesn't show up interactively)
-        plt.close(fig=fig)
-
-    # TODO: Return HTML displaying the movie
-    if in_notebook():
-        if False:
-            from IPython.display import display, HTML
-            htmlstr = "<div align=\"left\">"
-            htmlstr += "<video width=\"{}%\" controls>".format(str(50))
-            htmlstr += "<source src=\"{}\" type=\"video/mp4\">".format(filename)
-            htmlstr += "</video></div>"
-            htmlmovie = HTML(htmlstr)
-            return display(htmlmovie)
-        else:
-            from IPython.display import Video
-            return Video(filename, embed=False)
-    else:
-        print("Finished!")
-
-
-def plot(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=False, title=None,
+def plot(data, fig=None, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=False, title=None,
           xlabel="azimuth", ylabel="elevation", padding=None, N=None, time=None,
           central_latitude=20, central_longitude=30, gridargs=None, annotate=None, **kwargs):
     """
@@ -178,8 +72,10 @@ def plot(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fal
     ----------
     data: ndarray or tuple of ndarray
         Can be either mat, omegac, omegar, or fun.
+    fig:
+        Matplotlib figure to plot in (created if `None` which is default).
     ax:
-        Matplotlib axis to plot it (created if `None` which is default).
+        Matplotlib axis to plot in (created if `None` which is default).
     projection: None or str
         Which projection to use. `None` gives spherical coordinates.
     dpi : int or None (default)
@@ -212,6 +108,7 @@ def plot(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fal
         Object returned by `ax.pcolormesh(...)`.
     """
     use_cartopy = False
+    cax = None
 
     # Convert and resample data if needed.
     if N is not None:
@@ -261,12 +158,13 @@ def plot(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fal
             wpixels += 2*default_title_height_pixels
 
         # Create figure
-        if dpi is None:
-            figsize = plt.rcParams.get('figure.figsize')
-            figsize = (figsize[0], figsize[0]*hpixels/wpixels)
-        else:
-            figsize = (wpixels/float(dpi), hpixels/float(dpi))
-        fig = plt.figure(figsize=figsize)
+        if fig is None:
+            if dpi is None:
+                figsize = plt.rcParams.get('figure.figsize')
+                figsize = (figsize[0], figsize[0]*hpixels/wpixels)
+            else:
+                figsize = (wpixels/float(dpi), hpixels/float(dpi))
+            fig = plt.figure(figsize=figsize)
 
         # Define axes
         left = padding/wpixels
@@ -342,6 +240,152 @@ def plot(data, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=Fal
 plot2 = plot
 
 
+def get_ffmpeg_args(preset, extra_args, codec):
+    if extra_args is None:
+        extra_args = []
+
+    if preset == 'medium':
+        if '-b:v' not in extra_args:
+            extra_args += ['-b:v', '3000K']
+        if '-preset' not in extra_args and codec == 'h264':
+            extra_args += ['-preset', 'veryslow']
+    elif preset == "low":
+        if '-b:v' not in extra_args:
+            extra_args += ['-b:v', '1500K']
+    elif preset == "high":
+        if '-b:v' not in extra_args:
+            extra_args += ['-b:v', '8000K']
+        if '-preset' not in extra_args and codec == 'h264':
+            extra_args += ['-preset', 'veryslow']
+    elif preset == "twopass":
+        if '-b:v' not in extra_args:
+            extra_args += ['-b:v', '3000K']
+        if '-preset' not in extra_args and codec == 'h264':
+            extra_args += ['-preset', 'veryslow']
+    
+    return extra_args
+
+
+class Animation(object):
+
+    def __init__(self, 
+                 filename: str, 
+                 im = None,
+                 fps: int = 25,
+                 N = None,
+                 preset: str = 'medium',
+                 codec: str = 'h264',
+                 ffmpeg_args: str = None,
+                 title: str = "QUFLOW animation",
+                 **kwargs
+                 ):
+        
+        FFMpegWriter = anim.writers['ffmpeg']
+        title = title.replace('QUFLOW', filename.replace('.mp4', ''))
+        # metadata = dict(title=title, artist='Matplotlib', comment='http://github.com/klasmodin/quflow')
+        metadata = dict(artist='Quflow/Matplotlib', comment='http://github.com/klasmodin/quflow')
+        extra_args = get_ffmpeg_args(preset, ffmpeg_args, codec)
+
+        # File
+        self.filename = filename
+
+        # Resampling N
+        self.N = N
+
+        # Create ffmpeg writer
+        self.writer = FFMpegWriter(fps=fps, metadata=metadata, codec=codec, extra_args=extra_args)
+
+        # Plot image
+        self.im = im
+
+        # Save quflow.plot arguments
+        if 'dpi' not in kwargs:
+            kwargs['dpi'] = 100  # Default resolution
+        self._plot_kwargs = kwargs
+
+        # Setup writer if possible
+        if self.im is not None:
+            self.setup()
+
+
+    def __enter__(self):
+        # Enter context
+        return self
+
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # Exit context
+        self.finish()
+        # Return False to propagate the exception, True to suppress it
+        return False
+
+
+    def setup(self):
+        self.figure = self.im.figure
+        self.canvas = FigureCanvasAgg(self.figure)
+        self.writer.setup(self.figure, self.filename, dpi=100)
+
+
+    def finish(self):
+        self.writer.finish()
+        # Close figure (so it doesn't show up interactively)
+        plt.close(fig=self.figure)
+
+        # if in_notebook():
+        #     from IPython.display import Video
+        #     return Video(self.filename, embed=False)
+
+
+    def update(self, 
+               state: np.ndarray = None, 
+               time = None):
+    
+        if self.im is None:
+            # Create default plot
+            fun = as_fun(state)
+            if self.N is not None:
+                fun = resample(fun, self.N)
+            self.im = plot(fun, **self._plot_kwargs)
+            self.setup()
+        else:
+            if state is not None:
+                fun = as_fun(state)
+                if self.N is not None:
+                    fun = resample(fun, self.N)
+                if hasattr(self.im, 'set_data'):
+                    self.im.set_data(fun)
+                elif hasattr(self.im, 'set_array'):
+                    self.im.set_array(fun.ravel())
+                else:
+                    raise AttributeError("Could not find method for setting data.")
+        
+        # Add time
+        if time is not None:
+            if isinstance(time, str):
+                textstr = time
+            elif abs(time) < 100:
+                textstr = "t={:.1f}".format(time)
+            else:
+                textstr = "t={:.0f}".format(time)
+            # textstr = time if isinstance(time, str) else "t = {:.1f}".format(time)
+            if not hasattr(self, 'timetag'):
+                ax = self.im.axes
+                bbox = ax.get_window_extent().transformed(ax.figure.dpi_scale_trans.inverted())
+                width, height = bbox.width, bbox.height
+                # fig_width, fig_height = self.figure.get_size_inches()
+                scale_factor = width / 8  # Assuming 8 is the base size
+                self.timetag = ax.text(0.01, 0.91, textstr, 
+                                       transform=ax.transAxes, 
+                                       verticalalignment='baseline',
+                                       fontsize=24*scale_factor)
+            else:
+                self.timetag.set_text(textstr)
+
+        # Grab frame from figure
+        self.writer.grab_frame()
+
+
+
 def create_animation(filename, states, N=None, fps=25, preset='medium', extra_args=None,
                       codec='h264', title='QUFLOW animation',
                       progress_bar=True, progress_file=None, time=None, adaptive_scale=False, data2fun=as_fun, **kwargs):
@@ -369,28 +413,7 @@ def create_animation(filename, states, N=None, fps=25, preset='medium', extra_ar
     FFMpegWriter = anim.writers['ffmpeg']
     title = title.replace('QUFLOW', filename.replace('.mp4', ''))
     metadata = dict(title=title, artist='Matplotlib', comment='http://github.com/klasmodin/quflow')
-    if extra_args is None:
-        extra_args = []
-
-    if preset == 'medium':
-        if '-b:v' not in extra_args:
-            extra_args += ['-b:v', '3000K']
-        if '-preset' not in extra_args and codec == 'h264':
-            extra_args += ['-preset', 'veryslow']
-    elif preset == "low":
-        if '-b:v' not in extra_args:
-            extra_args += ['-b:v', '1500K']
-    elif preset == "high":
-        if '-b:v' not in extra_args:
-            extra_args += ['-b:v', '8000K']
-        if '-preset' not in extra_args and codec == 'h264':
-            extra_args += ['-preset', 'veryslow']
-    elif preset == "twopass":
-        if '-b:v' not in extra_args:
-            extra_args += ['-b:v', '3000K']
-        if '-preset' not in extra_args and codec == 'h264':
-            extra_args += ['-preset', 'veryslow']
-
+    extra_args = get_ffmpeg_args(preset, extra_args, codec)
 
     # Create ffmpeg writer
     writer = FFMpegWriter(fps=fps, metadata=metadata, codec=codec, extra_args=extra_args)
