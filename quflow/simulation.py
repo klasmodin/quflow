@@ -475,7 +475,7 @@ class QuSimulation(object):
 # RUNFILE CREATION FUNCTION
 # -------------------------
 
-def create_runfile(sim, folder=True, bash=True, overwrite=False, external=None):
+def create_runfile(sim, runfilename: str = None):
     """
     Create cluster runfile from QuSimulation object.
 
@@ -483,16 +483,9 @@ def create_runfile(sim, folder=True, bash=True, overwrite=False, external=None):
     ----------
     sim: QuSimulation or str
         If str, interpret as filename of QuSimulation file.
-    folder: bool
-        Whether to create a new folder. This also copies 
-        the QuSimulation file.
-    bash: bool
-        Whether to create bash-file.
-    overwrite: bool
-        Whether to overwrite existing files or folders.
-    external: str
-        Code external to QUFLOW needed to run the simulation
-        (for example a Hamiltonian for force function).
+    runfilename: str
+        Name of output file. Should end with .py. Default is to
+        base the name of the simfile name.
     """
     if not isinstance(sim, QuSimulation):
         if isinstance(sim, str):
@@ -535,11 +528,16 @@ if not args.animate:
 
 # Create animation
 if not args.simulate:
-    qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'])
+    animfile = filename.replace(".hdf5",".mp4")
+    with qf.QuSimulation(filename) as mysim, qf.Animation(animfile) as anim:
+        for k, t in enumerate(tqdm(mysim['time'])):
+            data = mysim['fun',k]
+            anim.update(data, time=t)
 
 """.format(sim.filename, sim['prerun'])
-    
-    with open(sim.filename.replace(".hdf5", "_runfile.py"), "w") as text_file:
+    if runfilename is None:
+        runfilename = sim.filename.replace(".hdf5", "_runfile.py")
+    with open(runfilename, "w") as text_file:
         text_file.write(filestr)
     
 
