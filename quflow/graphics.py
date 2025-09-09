@@ -240,7 +240,7 @@ def plot(data, fig=None, ax=None, projection='hammer', dpi=None, gridon=True, co
 plot2 = plot
 
 
-def get_ffmpeg_args(preset, extra_args, codec):
+def _get_ffmpeg_args(preset, extra_args, codec):
     if extra_args is None:
         extra_args = []
 
@@ -345,7 +345,7 @@ class Animation(object):
         title = title.replace('QUFLOW', filename.replace('.mp4', ''))
         # metadata = dict(title=title, artist='Matplotlib', comment='http://github.com/klasmodin/quflow')
         metadata = dict(artist='Quflow/Matplotlib', comment='http://github.com/klasmodin/quflow')
-        extra_args = get_ffmpeg_args(preset, ffmpeg_args, codec)
+        extra_args = _get_ffmpeg_args(preset, ffmpeg_args, codec)
 
         # File
         self.filename = filename
@@ -436,6 +436,7 @@ class Animation(object):
                 if self.N is not None:
                     fun = resample(fun, self.N)
                 self.im = plot(fun, **self._plot_kwargs)
+                im = self.im
                 self.setup()
             else:
                 fun = as_fun(state)
@@ -503,7 +504,7 @@ def create_animation(filename, states, N=None, fps=25, preset='medium', extra_ar
     FFMpegWriter = anim.writers['ffmpeg']
     title = title.replace('QUFLOW', filename.replace('.mp4', ''))
     metadata = dict(title=title, artist='Matplotlib', comment='http://github.com/klasmodin/quflow')
-    extra_args = get_ffmpeg_args(preset, extra_args, codec)
+    extra_args = _get_ffmpeg_args(preset, extra_args, codec)
 
     # Create ffmpeg writer
     writer = FFMpegWriter(fps=fps, metadata=metadata, codec=codec, extra_args=extra_args)
