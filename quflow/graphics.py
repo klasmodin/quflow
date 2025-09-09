@@ -267,6 +267,67 @@ def get_ffmpeg_args(preset, extra_args, codec):
 
 
 class Animation(object):
+    """
+    Animation class for creating and managing video animations using Matplotlib and FFmpeg.
+    This class provides a context manager interface for generating animations from quflow.QuSimulation data,
+    handling frame updates, time tagging, and saving the output as a video file.
+
+    filename : str
+        The output filename for the animation video (e.g., 'animation.mp4').
+        The initial image object to be animated. If None, a new plot will be created when updating with state data.
+    fps : int, default 25
+        Frames per second for the output video.
+    N : int, optional
+        Optional resampling parameter for the state data.
+    preset : {'low', 'medium', 'high'}, default 'medium'
+        FFmpeg preset for encoding speed/quality tradeoff.
+    codec : str, default 'h264'
+        Video codec to use for encoding.
+    ffmpeg_args : str, optional
+        Additional arguments to pass to FFmpeg.
+    title : str, default "QUFLOW animation"
+        Title metadata for the video file.
+    **kwargs : optional
+        Additional keyword arguments passed to the plotting function (e.g., dpi).
+    
+    Attributes
+    ----------
+    filename : str
+        Output filename for the animation.
+    N : int or None
+        Resampling parameter.
+    writer : matplotlib.animation.FFMpegWriter
+        FFmpeg writer object for saving frames.
+    im : matplotlib.image.AxesImage or similar
+        Image object being animated.
+    _plot_kwargs : dict
+        Keyword arguments for the plotting function.
+    figure : matplotlib.figure.Figure
+        Figure object associated with the animation.
+    canvas : matplotlib.backends.backend_agg.FigureCanvasAgg
+        Canvas for rendering the figure.
+    timetag : matplotlib.text.Text
+        Text object for displaying the current time on the animation.
+
+    Methods
+    -------
+    __enter__()
+        Enter the context manager, returning self.
+    __exit__(exc_type, exc_value, traceback)
+        Exit the context manager, finishing the animation and closing the figure.
+    setup()
+        Set up the animation writer and figure canvas.
+    finish()
+        Finalize the animation, close the figure, and optionally display the video in a notebook.
+    update(state=None, time=None, grab=True, im=None)
+        Update the animation frame with new state data and/or time tag, and optionally grab the frame for the video.
+    
+    Notes
+    -----
+    - The class is designed to be used as a context manager for safe resource handling.
+    - The `update` method can be called repeatedly to add frames to the animation.
+    - Time tags are automatically added or updated on the animation frames.
+    """
 
     def __init__(self, 
                  filename: str, 
@@ -338,24 +399,52 @@ class Animation(object):
 
     def update(self, 
                state: np.ndarray = None, 
-               time = None):
-    
-        if self.im is None:
-            # Create default plot
-            fun = as_fun(state)
-            if self.N is not None:
-                fun = resample(fun, self.N)
-            self.im = plot(fun, **self._plot_kwargs)
-            self.setup()
-        else:
-            if state is not None:
+               time = None,
+               grab = True,
+               im = None):
+        """
+        Updates the animation frame with the given state and time, and optionally grabs the frame for the video.
+
+        Parameters
+        ----------
+        state : np.ndarray, optional
+            The new state data to be visualized. If provided, updates the image data accordingly.
+        time : float or str, optional
+            The current time to display as a tag on the animation. Can be a float or a string.
+        grab : bool, default True
+            Whether to grab the current frame and add it to the animation.
+        im : matplotlib.image.AxesImage or similar, optional
+            The image object to update. If not provided, uses the default image associated with the animation.
+        Raises
+        ------
+        AttributeError
+            If the image object does not have a method for setting data.
+        Notes
+        -----
+        - If `state` is provided and no image exists, a new plot is created.
+        - If `time` is provided, a time tag is added or updated on the animation.
+        - If `grab` is True, the current frame is captured for the animation.
+        """
+        
+        if im is None:
+            im = self.im
+
+        if state is not None:
+            if im is None:
+                # Create default plot
                 fun = as_fun(state)
                 if self.N is not None:
                     fun = resample(fun, self.N)
-                if hasattr(self.im, 'set_data'):
-                    self.im.set_data(fun)
-                elif hasattr(self.im, 'set_array'):
-                    self.im.set_array(fun.ravel())
+                self.im = plot(fun, **self._plot_kwargs)
+                self.setup()
+            else:
+                fun = as_fun(state)
+                if self.N is not None:
+                    fun = resample(fun, self.N)
+                if hasattr(im, 'set_data'):
+                    im.set_data(fun)
+                elif hasattr(im, 'set_array'):
+                    im.set_array(fun.ravel())
                 else:
                     raise AttributeError("Could not find method for setting data.")
         
@@ -369,7 +458,7 @@ class Animation(object):
                 textstr = "t={:.0f}".format(time)
             # textstr = time if isinstance(time, str) else "t = {:.1f}".format(time)
             if not hasattr(self, 'timetag'):
-                ax = self.im.axes
+                ax = im.axes
                 bbox = ax.get_window_extent().transformed(ax.figure.dpi_scale_trans.inverted())
                 width, height = bbox.width, bbox.height
                 # fig_width, fig_height = self.figure.get_size_inches()
@@ -382,7 +471,8 @@ class Animation(object):
                 self.timetag.set_text(textstr)
 
         # Grab frame from figure
-        self.writer.grab_frame()
+        if grab:
+            self.writer.grab_frame()
 
 
 
