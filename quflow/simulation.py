@@ -496,6 +496,7 @@ def create_runfile(sim, runfilename: str = None):
 import numpy as np
 import quflow as qf
 import argparse
+from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-f", "--filename", help="Simfile name", type=str, default="{}") 
@@ -534,7 +535,7 @@ if not args.simulate:
             data = mysim['fun',k]
             anim.update(data, time=t)
 
-""".format(sim.filename, sim['prerun'])
+""".format(os.path.basename(sim.filename), sim['prerun'])
     if runfilename is None:
         runfilename = sim.filename.replace(".hdf5", "_runfile.py")
     with open(runfilename, "w") as text_file:
