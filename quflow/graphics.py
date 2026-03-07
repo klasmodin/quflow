@@ -62,7 +62,7 @@ def resample(data, N):
     return omega2
 
 
-def plot(data, fig=None, ax=None, projection='hammer', dpi=None, gridon=True, colorbar=False, title=None,
+def plot(data, fig=None, ax=None, projection='hammer', plot_contour = False, contour_data = None, no_levels = 5,  dpi=None, gridon=True, colorbar=False, title=None,
           xlabel="azimuth", ylabel="elevation", padding=None, N=None, time=None,
           central_latitude=20, central_longitude=30, gridargs=None, annotate=None, **kwargs):
     """
@@ -82,6 +82,10 @@ def plot(data, fig=None, ax=None, projection='hammer', dpi=None, gridon=True, co
         Resolution to use. Default (=None) is to use current Matplotlib figure settings.
     colorbar: bool
         Whether to add colorbar to plot.
+    plot_contour: bool
+        Whether to add contour lines to plot.
+    contour_data: ndarray
+        Data to use for contour lines. If None, use `data`. 
     title: str or None
         Plot title.
     xlabel: str
@@ -209,6 +213,7 @@ def plot(data, fig=None, ax=None, projection='hammer', dpi=None, gridon=True, co
             kwargs['transform'] = ccrs.PlateCarree()
     # lon, lat = np.meshgrid(lon, lat)
     im = ax.pcolormesh(lon, lat, fun, rasterized=True, **kwargs)
+    
     if gridon:
         if use_cartopy:
             ax.gridlines(draw_labels=False, dms=True, **gridargs)
@@ -233,7 +238,23 @@ def plot(data, fig=None, ax=None, projection='hammer', dpi=None, gridon=True, co
         annotate(ax)
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
+    # add contour lines
+    if plot_contour:
+        if contour_data is None:
+            contour_fun = fun
+        else:
+            if N is not None:
+                contour_data = resample(contour_data, N)
+            contour_fun = as_fun(contour_data)
+            if np.iscomplexobj(fun):
+                contour_fun = contour_fun.real
+        if use_cartopy:
+            ax.contour(lon, lat, contour_fun, colors='k', linewidths=0.5, transform=ccrs.PlateCarree(), levels = no_levels)
+        else:
+            ax.contour(lon, lat, contour_fun, colors='k', linewidths=0.5, levels = no_levels)
+            
 
+    
     return im
 
 
