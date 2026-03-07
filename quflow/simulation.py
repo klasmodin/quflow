@@ -400,7 +400,7 @@ class QuSimulation(object):
                 varset[0, ...] = arr
 
             # Add some default fields (this is temporary until a better integration class)
-            for name in ['tol', 'iterations', 'maxit']:
+            for name in ['tol_auto', 'iterations', 'number_of_maxit']:
                 if name not in kwargs:
                     kwargs[name] = 0.0
 
@@ -504,6 +504,7 @@ parser.add_argument("-a", "--animate", help="Only create animation.", action="st
 parser.add_argument("-s", "--simulate", help="Only simulate.", action="store_true")
 parser.add_argument("-t", "--simtime", help="Total simulation time.", type=float)
 parser.add_argument("--endtime", help="End simulation time.", type=float)
+parser.add_argument("--astride", help="Animation frame stride.", type=int, default=1)
 args = parser.parse_args()
 
 filename = args.filename
@@ -531,8 +532,9 @@ if not args.animate:
 if not args.simulate:
     animfile = filename.replace(".hdf5",".mp4")
     with qf.QuSimulation(filename) as mysim, qf.Animation(animfile) as anim:
-        for k, t in enumerate(tqdm(mysim['time'])):
-            data = mysim['fun',k]
+        for k in tqdm(range(0, len(mysim['time']), args.astride)):
+            t = mysim['time', k]
+            data = mysim['fun', k]
             anim.update(data, time=t)
 
 """.format(os.path.basename(sim.filename), sim['prerun'])

@@ -449,7 +449,7 @@ def isomp_fixedpoint(W,
         if verbatim:
             print("Tolerance set to {}.".format(tol))
         if stats:
-            stats['tol'] = tol
+            stats['tol_auto'] = tol
 
     # Variables for compensated summation
     if compsum:
@@ -608,7 +608,7 @@ def isomp_fixedpoint(W,
         print("Average number of iterations per step: {:.2f}".format(total_iterations/steps))
     if stats:
         stats["iterations"] = total_iterations/steps
-        stats["maxit"] = number_of_maxit/steps
+        stats["number_of_maxit"] = number_of_maxit/steps
 
     return W
 
