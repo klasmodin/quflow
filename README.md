@@ -19,7 +19,7 @@ Required:
 * `numpy`
 * `numba`
 * `scipy`
-* `pyssht`
+* `ducc0`
 * `h5py`
 * `appdirs`
 
@@ -54,7 +54,11 @@ you might want to run the following command after:
 ```
 > conda install "libblas=*=*accelerate"
 ```
-On the M1 Pro hardware, it gives a speedup of about a factor 5. 
+This enables hardware accelerated BLAS and LAPACK routines, which gives a significant speed-up.
+Even better, to use the [latest version of optimized LAPACK](https://conda-forge.org/news/2025/07/31/new-accelerate-macos/):
+```
+> conda install libblas=*=*_newaccelerate
+```
 
 ## Quick Start
 
@@ -69,3 +73,4 @@ An example notebook `notebooks/basic-example.ipynb` demonstrates the basic funct
 ## References
 
 [1] K. Modin and M. Viviani. *A Casimir preserving scheme for long-time simulation of spherical ideal hydrodynamics*, J. Fluid Mech., 884:A22, 2020.
+[2] K. Modin and M. Viviani. *A brief introduction to matrix hydrodynamics*, J. Comput. Dyn. (14), 17-35, 2026
