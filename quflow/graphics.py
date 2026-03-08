@@ -1,11 +1,12 @@
 from .transforms import as_fun, mat2shr
 import numpy as np
+from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib
 from matplotlib.pyplot import subplots
 from mpl_toolkits.axes_grid1 import ImageGrid
 import matplotlib.animation as anim
-from matplotlib.colors import hsv_to_rgb
+from matplotlib.colors import hsv_to_rgb, ListedColormap
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from scipy.ndimage import map_coordinates
 
@@ -14,7 +15,6 @@ try:
     _has_cartopy = True
 except ModuleNotFoundError:
     _has_cartopy = False
-
 
 def in_notebook():
     try:
@@ -26,6 +26,65 @@ def in_notebook():
     except AttributeError:
         return False
     return True
+
+
+def adjust_colormap_brightness(cmap_name: str, r: float, N: Optional[int] = None) -> ListedColormap:
+    """
+    Return a brightness-adjusted version of a Matplotlib colormap.
+
+    Parameters
+    ----------
+    cmap_name : str
+        Name of a Matplotlib colormap (e.g., 'viridis', 'plasma', 'tab10', etc.).
+    r : float
+        Brightness control in [0, 1].
+        - r = 0.0 -> completely black colormap
+        - r = 0.5 -> original colormap (no change)
+        - r = 1.0 -> completely white colormap
+        Values < 0.5 darken, values > 0.5 brighten (linearly in RGB).
+    N : int or None, optional
+        Number of entries in the resulting colormap. If None, uses the base colormap's
+        own size (preserves discreteness for listed colormaps like 'tab10').
+
+    Returns
+    -------
+    matplotlib.colors.ListedColormap
+        The adjusted colormap.
+
+    Notes
+    -----
+    - This performs a linear interpolation in RGB space. It preserves the colormap's
+      alpha channel.
+    - For perceptual uniformity, RGB-linear brightening may not match human-perceived
+      brightness perfectly; if needed, you can adapt this to operate in a perceptual
+      color space (e.g., CIELAB) instead.
+    """
+    if not (0.0 <= r <= 1.0):
+        raise ValueError("Parameter 'r' must be within [0, 1].")
+
+    # Get the base colormap without forcing a new N first (so we can read base.N)
+    base = plt.get_cmap(cmap_name)
+    if N is None:
+        N = base.N  # preserve original resolution/discreteness
+
+    # Now get a version sampled at N steps
+    base = plt.get_cmap(cmap_name, N)
+    colors = base(np.linspace(0, 1, N))  # shape (N, 4), RGBA
+
+    new = colors.copy()  # preserve alpha channel by default
+    if r < 0.5:
+        # Darken toward black
+        t = r / 0.5  # in [0, 1)
+        new[:, :3] = colors[:, :3] * t
+    elif r > 0.5:
+        # Brighten toward white
+        t = (r - 0.5) / 0.5  # in (0, 1]
+        new[:, :3] = colors[:, :3] + t * (1.0 - colors[:, :3])
+    else:
+        # r == 0.5 -> unchanged
+        pass
+
+    return ListedColormap(new, name=f"{cmap_name}_brightness_{r:.2f}")
 
 
 def resample(data, N):
@@ -62,9 +121,13 @@ def resample(data, N):
     return omega2
 
 
-def plot(data, fig=None, ax=None, projection='hammer', plot_contour = False, contour_data = None, no_levels = 5,  dpi=None, gridon=True, colorbar=False, title=None,
-          xlabel="azimuth", ylabel="elevation", padding=None, N=None, time=None,
-          central_latitude=20, central_longitude=30, gridargs=None, annotate=None, **kwargs):
+def plot(data, fig=None, ax=None,
+         dpi=None, colorbar=False, title=None,
+         padding=None, N=None, time=None,
+         projection='hammer', central_latitude=20, central_longitude=30, annotate=None,
+         grid=True, grid_kwargs=None,
+         contours=None, contour_data=None, contour_kwargs=None,
+         **kwargs):
     """
     Plot quantized functions on the sphere.
 
@@ -79,24 +142,24 @@ def plot(data, fig=None, ax=None, projection='hammer', plot_contour = False, con
     projection: None or str
         Which projection to use. `None` gives spherical coordinates.
     dpi : int or None (default)
-        Resolution to use. Default (=None) is to use current Matplotlib figure settings.
+        Resolution to use. Default (= None) is to use current Matplotlib figure settings.
     colorbar: bool
         Whether to add colorbar to plot.
-    plot_contour: bool
-        Whether to add contour lines to plot.
-    contour_data: ndarray
+    contours: int or None
+        Number of contour lines to plot.
+    contour_data: ndarray or None
         Data to use for contour lines. If None, use `data`. 
+    contour_kwargs: dict or None
+        Extra kwargs to send to the Matplotlib `contour` function.
+    contour_levels: int
+        How many contour levels to include.
     title: str or None
         Plot title.
-    xlabel: str
-        Label on x-axis.
-    ylabel: str
-        Label on y-axis.
     padding: int or None (default None)
         Amount (in pixels) of extra padding around image.
     N: int or None (default None)
         Up- or downsample to resolution N in plot.
-    time: int or None (default None)
+    time: float or None (default None)
         Display time tag in plot.
     central_latitude: float (default 20)
         Latitude orientation (in degrees) for `projections='orthographic'`.
@@ -201,10 +264,10 @@ def plot(data, fig=None, ax=None, projection='hammer', plot_contour = False, con
     lon = np.linspace(-np.pi, np.pi, fun.shape[1], endpoint=False)
     lat = np.linspace(-np.pi/2., np.pi/2., fun.shape[0])
     default_gridargs = {'color': 'black', 'alpha': 0.2}
-    if gridargs is not None:
-        gridargs = {**default_gridargs, **gridargs}
+    if grid_kwargs is not None:
+        grid_kwargs = {**default_gridargs, **grid_kwargs}
     else:
-        gridargs = default_gridargs
+        grid_kwargs = default_gridargs
 
     if use_cartopy:
         lon *= 360/(2*np.pi)
@@ -214,11 +277,11 @@ def plot(data, fig=None, ax=None, projection='hammer', plot_contour = False, con
     # lon, lat = np.meshgrid(lon, lat)
     im = ax.pcolormesh(lon, lat, fun, rasterized=True, **kwargs)
     
-    if gridon:
+    if grid:
         if use_cartopy:
-            ax.gridlines(draw_labels=False, dms=True, **gridargs)
+            ax.gridlines(draw_labels=False, dms=True, **grid_kwargs)
         else:
-            ax.grid(linestyle='-', **gridargs)
+            ax.grid(linestyle='-', **grid_kwargs)
     ax.set_xticklabels([])
     ax.set_yticklabels([])
 
@@ -238,23 +301,31 @@ def plot(data, fig=None, ax=None, projection='hammer', plot_contour = False, con
         annotate(ax)
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
+    
     # add contour lines
-    if plot_contour:
+    if contours:
         if contour_data is None:
             contour_fun = fun
         else:
             if N is not None:
                 contour_data = resample(contour_data, N)
             contour_fun = as_fun(contour_data)
-            if np.iscomplexobj(fun):
+            if np.iscomplexobj(contour_fun):
                 contour_fun = contour_fun.real
+        if contour_kwargs is None:
+            contour_kwargs = dict()
+        default_contour_kwargs = {'negative_linestyles':'solid', 
+                                  'colors':None if 'cmap' in contour_kwargs else 'k', 
+                                  'linewidths':0.5,
+                                  'vmin':kwargs['vmin'],
+                                  'vmax':kwargs['vmax']
+                                  }
         if use_cartopy:
-            ax.contour(lon, lat, contour_fun, colors='k', linewidths=0.5, transform=ccrs.PlateCarree(), levels = no_levels)
-        else:
-            ax.contour(lon, lat, contour_fun, colors='k', linewidths=0.5, levels = no_levels)
+            default_contour_kwargs['transform'] = kwargs['transform']
+        default_contour_kwargs['levels'] = 10 if isinstance(contours, bool) else contours
+        contour_kwargs = {**default_contour_kwargs, **contour_kwargs}
+        ax.contour(lon, lat, contour_fun, **contour_kwargs)
             
-
-    
     return im
 
 
