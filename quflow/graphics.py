@@ -129,51 +129,62 @@ def plot(data, fig=None, ax=None,
          contours=None, contour_data=None, contour_kwargs=None,
          **kwargs):
     """
-    Plot quantized functions on the sphere.
+    Plot functions on the sphere.
 
     Parameters
     ----------
-    data: ndarray or tuple of ndarray
+    data : ndarray or tuple of ndarray
         Can be either mat, omegac, omegar, or fun.
-    fig:
-        Matplotlib figure to plot in (created if `None` which is default).
-    ax:
-        Matplotlib axis to plot in (created if `None` which is default).
-    projection: None or str
-        Which projection to use. `None` gives spherical coordinates.
-    dpi : int or None (default)
-        Resolution to use. Default (= None) is to use current Matplotlib figure settings.
-    colorbar: bool
-        Whether to add colorbar to plot.
-    contours: int or None
-        Number of contour lines to plot.
-    contour_data: ndarray or None
-        Data to use for contour lines. If None, use `data`. 
-    contour_kwargs: dict or None
-        Extra kwargs to send to the Matplotlib `contour` function.
-    contour_levels: int
-        How many contour levels to include.
-    title: str or None
-        Plot title.
-    padding: int or None (default None)
-        Amount (in pixels) of extra padding around image.
-    N: int or None (default None)
-        Up- or downsample to resolution N in plot.
-    time: float or None (default None)
-        Display time tag in plot.
-    central_latitude: float (default 20)
-        Latitude orientation (in degrees) for `projections='orthographic'`.
-    central_longitude: float (default 30)
-        Longitude orientation (in degrees) for `projections='orthographic'`.
-    annotate: callable(ax) or None (default None)
-        Function to add annotations to the created axes `ax`. 
-    kwargs:
-        Arguments to send to `ax.pcolormesh(...)`.
+    fig : matplotlib.figure.Figure, optional
+        Matplotlib figure to plot in. If None (default), a new figure is created.
+    ax : matplotlib.axes.Axes, optional
+        Matplotlib axis to plot in. If None (default), a new axis is created.
+    dpi : int or None, optional
+        Resolution to use. Default (None) uses current Matplotlib figure settings.
+    colorbar : bool, optional
+        Whether to add colorbar to plot. Default is False.
+    title : str or None, optional
+        Plot title. Default is None.
+    padding : int or None, optional
+        Amount (in pixels) of extra padding around image. Default is None.
+        If None, padding is automatically set based on other parameters.
+    N : int or None, optional
+        Up- or downsample to resolution N in plot. Default is None.
+    time : float or None, optional
+        Display time tag in plot. Default is None.
+    projection : None or str or cartopy.crs.CRS, optional
+        Which projection to use. Options are 'hammer', 'mollweide', 'orthographic', 
+        'perspective', or None for spherical coordinates. Default is 'hammer'.
+    central_latitude : float, optional
+        Latitude orientation (in degrees) for orthographic/perspective projections.
+        Default is 20.
+    central_longitude : float, optional
+        Longitude orientation (in degrees) for orthographic/perspective projections.
+        Default is 30.
+    annotate : callable or None, optional
+        Function to add annotations to the created axes. Should accept ax as argument.
+        Default is None.
+    grid : bool, optional
+        Whether to display grid lines. Default is True.
+    grid_kwargs : dict or None, optional
+        Extra kwargs to send to the grid function. Default is None.
+    contours : int or None, optional
+        Number of contour lines to plot. If None, no contours are drawn.
+        If True, defaults to 10 levels. Default is None.
+    contour_data : ndarray or None, optional
+        Data to use for contour lines. If None, use `data`. Default is None.
+    contour_kwargs : dict or None, optional
+        Extra kwargs to send to the Matplotlib `contour` function. Default is None.
+    **kwargs
+        Additional arguments to send to `ax.pcolormesh()`, including 'vmin', 'vmax',
+        and 'cmap'.
 
     Returns
     -------
-        Object returned by `ax.pcolormesh(...)`.
+    matplotlib.collections.QuadMesh
+        Object returned by `ax.pcolormesh()`.
     """
+
     use_cartopy = False
     cax = None
 
