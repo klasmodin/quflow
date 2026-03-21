@@ -176,8 +176,8 @@ def plot(data, fig=None, ax=None,
     contour_kwargs : dict or None, optional
         Extra kwargs to send to the Matplotlib `contour` function. Default is None.
     **kwargs
-        Additional arguments to send to `ax.pcolormesh()`, including 'vmin', 'vmax',
-        and 'cmap'.
+        Additional keyword darguments to send to `ax.pcolormesh()`, 
+        including 'vmin', 'vmax', and 'cmap'.
 
     Returns
     -------
