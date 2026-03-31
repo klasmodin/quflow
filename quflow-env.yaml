@@ -19,5 +19,6 @@ dependencies:
   - prettytable
   - fftw
   - ducc0
+  - libblas=*=*_newaccelerate # [arm64 and osx]
   - pip:
     - https://github.com/klasmodin/quflow/archive/master.zip
