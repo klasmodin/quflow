@@ -20,5 +20,6 @@ dependencies:
   - fftw
   - ducc0
   - libblas=*=*_newaccelerate # [arm64 and osx]
+  - libblas=*=*mkl # [x86_64]
   - pip:
     - https://github.com/klasmodin/quflow/archive/master.zip
