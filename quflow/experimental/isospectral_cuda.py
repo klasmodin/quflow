@@ -49,9 +49,9 @@ void conj_subtract_d(thrust::complex<double>* __restrict__ A,
 
 class IsompCUDA(object):
 
-    def __init__(self, W0: cp.ndarray|np.ndarray):
+    def __init__(self, N, dtype):
         
-        self.N = W0.shape[0]
+        self.N = N
         
         prop = cp.cuda.runtime.getDeviceProperties(0)
         cc = f"{prop['major']}{prop['minor']}"
@@ -59,7 +59,7 @@ class IsompCUDA(object):
                                   backend='nvcc',
                                   options=(f'-arch=sm_{cc}','-std=c++17','-O3',),)
         
-        dtype = cp.dtype(W0.dtype)
+        dtype = cp.dtype(dtype)
         
         if dtype == cp.complex64:
             self.conj_subtract_ker = self.c_mod.get_function("conj_subtract_f")
@@ -68,11 +68,11 @@ class IsompCUDA(object):
         else:
             raise TypeError("W0 has to be of dtype complex64 or complex128.")
           
-        self.dW     = cp.zeros(W0.shape, dtype=W0.dtype)
-        self.dW_old = cp.zeros(W0.shape, dtype=W0.dtype)
-        self.Whalf  = cp.zeros(W0.shape, dtype=W0.dtype)
-        self.Phalf  = cp.zeros(W0.shape, dtype=W0.dtype)
-        self.PWcomm = cp.zeros(W0.shape, dtype=W0.dtype)
+        self.dW     = cp.zeros((N, N), dtype=dtype)
+        self.dW_old = cp.zeros((N, N), dtype=dtype)
+        self.Whalf  = cp.zeros((N, N), dtype=dtype)
+        self.Phalf  = cp.zeros((N, N), dtype=dtype)
+        self.PWcomm = cp.zeros((N, N), dtype=dtype)
 
         self.set_matmul_state()
 
