@@ -213,7 +213,7 @@ class QuSimulation(object):
                     else:
                         f[self.args_datapath].attrs[name] = np.array([myp])
             elif name == "prerun":
-                prerun = "\n".join([l for l in value.strip().split("\n") if "In[" not in l])
+                prerun = "\n".join([l for l in value.strip().split("\n") if "In[len" not in l])
                 f[self.datapath].attrs[name] = prerun
                 value = prerun
                 # exec(prerun, globals())

@@ -1,5 +1,6 @@
 import numpy as np
 from numba import njit, prange
+from .utils import complex_dtype, real_dtype
 
 try:
     from pyssht import ind2elm, forward, inverse

@@ -165,7 +165,7 @@ def laplace(P):
     N = P.shape[0]
     A = laplacian(N)
 
-    W = A.dot(P.ravel()).reshape((N, N))
+    W = A.dot(P.ravel(order='C')).reshape((N, N), order='C')
     return W
 
 

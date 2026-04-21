@@ -168,8 +168,9 @@ def plot(data, fig=None, ax=None,
         Whether to display grid lines. Default is True.
     grid_kwargs : dict or None, optional
         Extra kwargs to send to the grid function. Default is None.
-    contours : int or None, optional
-        Number of contour lines to plot. If None, no contours are drawn.
+    contours : int, array-like, bool, or None, optional
+        Number of contour lines to plot. If None or False, no contours are drawn.
+        If array, it selects the level values.
         If True, defaults to 10 levels. Default is None.
     contour_data : ndarray or None, optional
         Data to use for contour lines. If None, use `data`. Default is None.
@@ -314,7 +315,9 @@ def plot(data, fig=None, ax=None,
         ax.set_ylim(ylim)
     
     # add contour lines
-    if contours:
+    if isinstance(contours, bool) and not contours:
+        contours = None
+    if contours is not None:
         if contour_data is None:
             contour_fun = fun
         else:
