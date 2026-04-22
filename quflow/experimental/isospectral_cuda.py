@@ -49,15 +49,18 @@ void conj_subtract_d(thrust::complex<double>* __restrict__ A,
 
 class IsompCUDA(object):
 
-    def __init__(self, N, dtype):
+    def __init__(self, N, dtype, cuda_debug=False):
         
         self.N = N
         
         prop = cp.cuda.runtime.getDeviceProperties(0)
         cc = f"{prop['major']}{prop['minor']}"
+        options = (f'-arch=sm_{cc}','-std=c++17','-O3',)
+        if cuda_debug:
+            options = (f'-arch=sm_{cc}','-std=c++17','-g','-G')
         self.c_mod = cp.RawModule(code=kernel_src,
                                   backend='nvcc',
-                                  options=(f'-arch=sm_{cc}','-std=c++17','-O3',),)
+                                  options=options,)
         
         dtype = cp.dtype(dtype)
         

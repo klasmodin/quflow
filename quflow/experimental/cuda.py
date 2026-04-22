@@ -123,7 +123,7 @@ void reorder_diag_d(const double* __restrict__ Xr,
 class DiagTriDiagOp(object):
 
 # -------------------------------------------------------------------------------------- # 
-  def __init__(self, N, dtype):
+  def __init__(self, N, dtype, cuda_debug=False):
     
     self.N = N
     
@@ -147,9 +147,12 @@ class DiagTriDiagOp(object):
     
     prop = cp.cuda.runtime.getDeviceProperties(0)
     cc = f"{prop['major']}{prop['minor']}"
+    options = (f'-arch=sm_{cc}','-std=c++17','-O3',)
+    if cuda_debug:
+        options = (f'-arch=sm_{cc}','-std=c++17','-g','-G')
     self.c_mod = cp.RawModule(code=kernel_src,
                               backend='nvcc',
-                              options=(f'-arch=sm_{cc}','-std=c++17','-O3',),)
+                              options=options,)
 
     if self.single_precision:
       self.extract_diag = self.c_mod.get_function("extract_diag_f")
