@@ -80,8 +80,12 @@ class IsompCUDA(object):
     def set_matmul_state(self):
       
         # C --> alpha * AxB + beta * C
-        alpha = 1
-        beta  = 0
+        if self.Phalf.dtype == cp.complex128:
+            alpha = 1.0
+            beta  = 0.0
+        elif self.Phalf.dtype == cp.complex64:
+            alpha = cp.float64(1.0)
+            beta = cp.float64(0.0)
     
         self.matmul = Matmul(self.Phalf,
                              self.Whalf,
@@ -173,7 +177,7 @@ class IsompCUDA(object):
         # check if W is cupy array
         if not isinstance(W, cp.ndarray):
             # print("Warning: passed numpy array W at cuda integrator")
-            W = cp.asarray(W)
+            W = cp.asarray(W, dtype=self.dW.dtype)
 
         # Check input
         assert minit >= 1, "minit must be at least 1."
@@ -204,6 +208,15 @@ class IsompCUDA(object):
         # Define constants
         hb = hbar(N=W.shape[-1])
         vareps = dt/(2*hb)
+        zero_real = 0.0
+
+        # Convert constants to single precision if needed
+        if self.Phalf.dtype == cp.complex64:
+            hb = cp.float32(hb)
+            vareps = cp.float32(vareps)
+            zero_real = cp.float32(zero_real)
+            dt = cp.float32(dt)
+            tol = cp.float32(tol)
 
         # Specify tolerance if needed
         if (tol == 'auto') or (tol < 0):
@@ -221,6 +234,10 @@ class IsompCUDA(object):
             if stats:
                 stats['tol'] = tol.get()
 
+        # Convert tolerance to single precision if needed
+        if self.Phalf.dtype == cp.complex64:
+            tol = cp.float32(tol)
+
         # --- Beginning of step loop ---
         for k in range(steps):
 
@@ -232,7 +249,7 @@ class IsompCUDA(object):
             # Per step updates
             resnorm = np.inf
             if reinitialize:
-                self.dW.fill(0.0)
+                self.dW.fill(zero_real)
 
             # --- Beginning of iterations ---
             for i in range(maxit):
@@ -313,7 +330,7 @@ class IsompCUDA(object):
                 W += FW
         
             if time is not None:
-                time += dt
+                time += dt.get()
 
             # Apply half a Strang step
             if strang_splitting:
