@@ -238,8 +238,14 @@ class IsompCUDA(object):
         if self.Phalf.dtype == cp.complex64:
             tol = cp.float32(tol)
 
+        # Get stream
+        stream = cp.cuda.get_current_stream()
+
         # --- Beginning of step loop ---
         for k in range(steps):
+
+            # Sync stream (KM: I'm not sure this is needed)
+            stream.synchronize()
 
             # Apply half a Strang step
             if strang_splitting:
