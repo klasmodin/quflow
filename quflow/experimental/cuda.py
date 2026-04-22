@@ -249,7 +249,7 @@ class DiagTriDiagOp(object):
     else:
       self.batch_count=math.ceil(N/2)    
     
-    s = (N-1)/2.0
+    s = (N-1)/2
     
     for i in range(self.batch_count):
       
@@ -258,14 +258,14 @@ class DiagTriDiagOp(object):
       # upper batch
       m = i
       j = np.arange(0,N-m,dtype=np_dtype)
-      d_ub = -2.0 * (s * (2.0 * j + 1.0 + m) - j * (j + m))
+      d_ub = -2 * (s * (2 * j + 1 + m) - j * (j + m))
       if m==0:
-        d_ub[0] += 0.5
+        d_ub[0] += 1/2
       
       # lower batch
       m = N-i
       j = np.arange(0,N-m,dtype=np_dtype)
-      d_lb = -2.0 * (s * (2.0 * j + 1.0 + m) - j * (j + m))
+      d_lb = -2 * (s * (2 * j + 1 + m) - j * (j + m))
       
       d = np.append(d,d_ub)
       d = np.append(d,d_lb)

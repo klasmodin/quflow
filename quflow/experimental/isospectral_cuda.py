@@ -80,8 +80,8 @@ class IsompCUDA(object):
     def set_matmul_state(self):
       
         # C --> alpha * AxB + beta * C
-        alpha = 1.0
-        beta  = 0.0
+        alpha = 1
+        beta  = 0
     
         self.matmul = Matmul(self.Phalf,
                              self.Whalf,
@@ -95,7 +95,7 @@ class IsompCUDA(object):
 # -------------------------------------------------------------------------------------- #
     def conj_subtract(self,X):
         
-        threads = (16,16)
+        threads = (16, 16)
         blocks  = (math.ceil(self.N / threads[0]),
                    math.ceil(self.N / threads[1]))
         
