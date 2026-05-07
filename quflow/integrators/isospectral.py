@@ -153,7 +153,7 @@ def estimate_stepsize(W, P=None, safety_factor=0.1):
 # -------------------
 
 def isomp_quasinewton(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None,
-                      tol="auto", maxit=10, verbatim=False):
+                      tol="auto", maxit=10, verbatim=False, **kwargs):
     """
     Time-stepping by isospectral midpoint second order method using
     a quasi-Newton iteration scheme. This scheme preserves the eigen-spectrum
@@ -255,7 +255,7 @@ def isomp_quasinewton(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None,
     return W
 
 
-def isomp_simple(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None):
+def isomp_simple(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None, **kwargs):
     """
     Time-stepping by the simplified isospectral midpoint method.
     This is an explicit isospectral method but not symplectic. Nor is it reversible.
