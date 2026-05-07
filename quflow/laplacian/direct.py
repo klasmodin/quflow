@@ -217,12 +217,22 @@ def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
         vk = b[0]
         v[0] = vk
         fk = W[0, m]
+        if m == 0:
+            # Compute circulation (scaled trace) of W matrix
+            trW = W[0, 0]
+            for k in range(1, N):
+                trW += W[k, k]
+            trW /= N        
+            fk -= trW
+
         yk = fk
         y[0] = yk
 
         for k in range(1, n):
             lk = a[k]/vk
             fk = W[k, m+k]
+            if m == 0:
+                fk -= trW
             yk = fk - lk*yk
             y[k] = yk
             vk = b[k] - lk*a[k]
@@ -239,9 +249,14 @@ def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
             if m != 0:
                 P[m+k, k] = -np.conj(pk)
 
-    trP = np.trace(P)/N
-    for k in range(N):
-        P[k, k] -= trP
+        if m == 0:
+            # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+            trP = P[0, 0]
+            for k in range(1, N):
+                trP += P[k, k]
+            trP /= N
+            for k in range(N):
+                P[k, k] -= trP
 
 
 @njit(parallel=False)
@@ -280,6 +295,13 @@ def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
         v[0] = vk
         if m < 0:
             fk = W[absm, 0]
+        elif m == 0:
+            # Compute circulation (scaled trace) of W matrix
+            trW = W[0, 0]
+            for k in range(1, N):
+                trW += W[k, k]
+            trW /= N        
+            fk = W[0, 0] - trW
         else:
             fk = W[0, absm]
         yk = fk
@@ -289,6 +311,8 @@ def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
             lk = a[k]/vk
             if m < 0:
                 fk = W[absm+k, k]
+            elif m == 0:
+                fk = W[k, k] - trW
             else:
                 fk = W[k, absm+k]
             yk = fk - lk*yk
@@ -309,9 +333,18 @@ def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
             else:
                 P[k, absm+k] = pk
 
-    trP = np.trace(P)/N
-    for k in range(N):
-        P[k, k] -= trP
+        if m == 0:
+            # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+            trP = P[0, 0]
+            for k in range(1, N):
+                trP += P[k, k]
+            trP /= N
+            for k in range(N):
+                P[k, k] -= trP
+
+    # trP = np.trace(P)/N
+    # for k in range(N):
+    #     P[k, k] -= trP
 
 
 # Default choice of direct solver

@@ -17,13 +17,15 @@ _parallel = True
 # ---------------------
 
 @njit
-def mat2diagh(W):
+def mat2diagh(W, tracefree=True):
     """
     Return lower diagonal format for hermitian matrix W.
 
     Parameters
     ----------
     W: ndarray, shape=(N, N)
+    tracefree: bool
+        Enforce trace free condition on W.
 
     Returns
     -------
@@ -42,6 +44,11 @@ def mat2diagh(W):
         # Insert in d matrix
         d[m, :N-m] = dm
         d[m, N-m:] = dNm
+
+        if tracefree and m == 0:
+            trW = d[0,:N].sum()
+            trW /= N
+            d[0,:N] -= trW
 
     return d
 

@@ -83,7 +83,8 @@ def _compute_cpu_laplacian(N, bc=False, dtype=np.float64):
             lap[i, j, 1] = np.sqrt(((k + absm)*(N - k - absm))*(k*(N - k)))
 
     if bc:
-        lap[0, 0, 0] += 0.5
+        # lap[0, 0, 0] += 0.5
+        lap[0, 0, 0] -= 0.5
 
     return lap
 
@@ -217,11 +218,18 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
     for m in prange(-N+1, N):
 
         absm = np.abs(m)
-
+        
         # Initialize buffers
         i, j = mk2ij(m, 0)
         buffer_float[i, j] = lap[i, j, 0]
         buffer_complex[i, j] = W[i, j]
+        if m==0:
+            # Compute circulation (scaled trace) of W matrix
+            trW = W[0, 0]
+            for k in range(1, N):
+                trW += W[k, k]
+            trW /= N        
+            buffer_complex[i, j] -= trW
 
         # Forward sweep
         for k in range(1, N-absm):
@@ -231,6 +239,8 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
             w = lap[i, j, 1]/buffer_float[im, jm]
             buffer_float[i, j] = lap[i, j, 0] - w*lap[i, j, 1]
             buffer_complex[i, j] = W[i, j] - w*buffer_complex[im, jm]
+            if m==0:
+                buffer_complex[i, j] -= trW
 
         # Backward sweep
         i, j = mk2ij(m, N-absm-1)
@@ -242,13 +252,22 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
             P[i, j] = (buffer_complex[i, j] - lap[ip, jp, 1]*P[ip, jp])/buffer_float[i, j]
             # P[j, i] = np.conj(P[i, j])
 
-    # Make sure the trace of P vanishes (corresponds to bc for laplacian)
-    trP = P[0, 0]
-    for k in range(1, N):
-        trP += P[k, k]
-    trP /= N
-    for k in range(N):
-        P[k, k] -= trP
+        if m==0:
+            # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+            trP = P[0, 0]
+            for k in range(1, N):
+                trP += P[k, k]
+            trP /= N
+            for k in range(N):
+                P[k, k] -= trP
+
+    # # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+    # trP = P[0, 0]
+    # for k in range(1, N):
+    #     trP += P[k, k]
+    # trP /= N
+    # for k in range(N):
+    #     P[k, k] -= trP
 
     return P
 
@@ -283,6 +302,13 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
         i, j = mk2ij(m, 0)
         buffer_float[i, j] = lap[i, j, 0]
         buffer_complex[i, j] = W[i, j]
+        if m==0:
+            # Compute circulation (scaled trace) of W matrix
+            trW = W[0, 0]
+            for k in range(1, N):
+                trW += W[k, k]
+            trW /= N        
+            buffer_complex[i, j] -= trW
 
         # Forward sweep
         for k in range(1, N-m):
@@ -292,6 +318,8 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
             w = lap[i, j, 1]/buffer_float[im, jm]
             buffer_float[i, j] = lap[i, j, 0] - w*lap[i, j, 1]
             buffer_complex[i, j] = W[i, j] - w*buffer_complex[im, jm]
+            if m==0:
+                buffer_complex[i, j] -= trW
 
         # Backward sweep
         i, j = mk2ij(m, N-m-1)
@@ -304,14 +332,23 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
             P[i, j] = (buffer_complex[i, j] - lap[ip, jp, 1]*P[ip, jp])/buffer_float[i, j]
             if m != 0:
                 P[j, i] = -np.conj(P[i, j])
+        
+        if m==0:
+            # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+            trP = P[0, 0]
+            for k in range(1, N):
+                trP += P[k, k]
+            trP /= N
+            for k in range(N):
+                P[k, k] -= trP
 
-    # Make sure the trace of P vanishes (corresponds to bc for laplacian)
-    trP = P[0, 0]
-    for k in range(1, N):
-        trP += P[k, k]
-    trP /= N
-    for k in range(N):
-        P[k, k] -= trP
+    # # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+    # trP = P[0, 0]
+    # for k in range(1, N):
+    #     trP += P[k, k]
+    # trP /= N
+    # for k in range(N):
+    #     P[k, k] -= trP
 
     return P
 
@@ -360,14 +397,27 @@ def _solve_cpu_generic(lap, W, P, buffer_float, buffer_complex):
         # First element: k = m
         val_float = lap_flat[m, 0]
         val_complex = W_flat[m]
+        if m == 0:
+            # Compute scaled trace
+            trW = W_flat[0]
+            for k in range(stride, N**2, stride):
+                trW += W_flat[k]
+            trW /= N
+
+            # Correct diagonal
+            val_complex -= trW
+
         buffer_float_flat[m] = val_float
-        buffer_complex_flat[m] = val_complex
+        buffer_complex_flat[m] = val_complex            
 
         # Forward sweep according to grid-stride
         for k in range(m + stride, N**2, stride):
             w = lap_flat[k, 1]/val_float
             val_float = lap_flat[k, 0] - w*lap_flat[k, 1]
             val_complex = W_flat[k] - w*val_complex
+            if m == 0:
+                # Correct diagonal
+                val_complex -= trW
             buffer_float_flat[k] = val_float
             buffer_complex_flat[k] = val_complex
             k_last = k
@@ -381,17 +431,18 @@ def _solve_cpu_generic(lap, W, P, buffer_float, buffer_complex):
             val_complex = P_flat[k]
             val_float = lap_flat[k, 1]
 
-    # Make sure the trace of P vanishes (corresponds to bc for laplacian)
-    trP = P_flat[::N+1].sum()
-    trP /= N
-    P_flat[::N+1] -= trP
+        if m == 0:
+            # Make sure the trace of P vanishes (corresponds to bc for laplacian)
+            trP = P_flat[::stride].sum()
+            trP /= N
+            P_flat[::stride] -= trP
 
     return P
 
 
 # Set default solver
 _solve_cpu = _solve_cpu_skewh
-# _solve_cpu = solve_cpu_generic_
+# _solve_cpu = _solve_cpu_generic
 
 
 @njit(error_model='numpy', fastmath=True)

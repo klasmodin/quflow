@@ -81,9 +81,18 @@ def compute_sparse_laplacian_ind_(N, values, ivals, jvals, bc=False):
 
     # Make sure matrix is invertible (corresponds to adding BC in Poisson equations)
     if bc:
-        for h in range(N):
+        ivals[count] = 0
+        jvals[count] = 0
+        values[count] = -1/N
+        count += 1
+
+        for h in range(1, N):
             ivals[count] = 0
             jvals[count] = h*(N+1)
+            values[count] = -1/N
+            count += 1
+            ivals[count] = h*(N+1)
+            jvals[count] = 0
             values[count] = -1/N
             count += 1
 
@@ -192,6 +201,11 @@ def solve_poisson(W):
 
         # Compute sparse LU
         _lu_laplacian_cache[N] = compute_lu(A)
+
+    trW = np.trace(W)/N
+    if np.abs(trW) > 1e-15:  # Should probably check relative error here
+        W = W.copy()
+        W.ravel()[::N+1] -= trW
 
     P = _lu_laplacian_cache[N].solve(W.ravel()).reshape((N, N))
     P.ravel()[::N+1] -= np.trace(P)/N
