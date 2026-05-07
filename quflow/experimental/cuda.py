@@ -374,7 +374,9 @@ class DiagTriDiagOp(object):
         batch_stride,
         self.p_buffer.data.ptr
         )
-
+      
+      xi = self.xi[0:self.N].copy()
+      
       cusp.sgtsv2strided_batch(
         self.handle,
         N,
@@ -386,6 +388,8 @@ class DiagTriDiagOp(object):
         batch_stride,
         self.p_buffer.data.ptr
         )
+      
+      self.handle_main_diag_single_precision(xi)
 
     else:
 
@@ -443,4 +447,42 @@ class DiagTriDiagOp(object):
                math.ceil(self.batch_count / threads[1]))
 
     self.reorder_diag(blocks,threads,(self.xr,self.xi,self.N,self.batch_count,P))
+# -------------------------------------------------------------------------------------- #
+
+# -------------------------------------------------------------------------------------- #
+  def handle_main_diag_single_precision(self,xi):
+  
+    N = self.N
+    ldb = N
+    nrh = 1
+    
+    dl = self.dl[0:N]
+    d  = self.d[0:N]
+    du = self.du[0:N]
+
+    buf_bytes = cusp.sgtsv2_buffer_size_ext(
+      self.handle,
+      N,
+      nrh,
+      dl.data.ptr,
+      d.data.ptr,
+      du.data.ptr,
+      xi.data.ptr,
+      ldb)
+      
+    buf = cp.empty(buf_bytes,dtype=cp.uint8)
+
+    # solve imaginary
+    cusp.sgtsv2(self.handle,
+      N,
+      nrh,
+      dl.data.ptr,
+      d.data.ptr,
+      du.data.ptr,
+      xi.data.ptr,
+      ldb,
+      buf.data.ptr)
+
+    self.xr[0:N] = 0.0
+    self.xi[0:N] = xi
 # -------------------------------------------------------------------------------------- #
