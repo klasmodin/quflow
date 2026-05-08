@@ -8,6 +8,25 @@ import quflow.laplacian.cpu as qucpu
 import quflow.laplacian.gpu as qugpu
 from scipy.sparse import dia_matrix
 
+try:
+    import cupy as cp
+except ImportError:
+    cuda_available = False
+else:
+    cuda_available = True if cp.is_available() else False
+
+qucuda = None
+if cuda_available:
+    from quflow.experimental.cuda import DiagTriDiagOp
+    class CudaPoissonWrapper(object):
+        def solve_poisson(self, W):
+            N = W.shape[-1]
+            ham = DiagTriDiagOp(N, dtype=np.dtype(W.dtype))
+            Wd = cp.asarray(W)
+            Pd = ham(Wd)
+            return Pd.get()
+
+    qucuda = CudaPoissonWrapper()
 
 def get_random_omega_real(N=5):
     return np.random.randn(N**2)
@@ -203,8 +222,11 @@ def test_solve_poisson_multistate(N):
 @pytest.mark.parametrize("N", [33, 64, 101])
 @pytest.mark.parametrize("skewh", [True, False])
 @pytest.mark.parametrize("zerotrace", [True, False])
-@pytest.mark.parametrize("qulap", [qudirect, qucpu, qugpu, qusparse, qutridiagonal])
+@pytest.mark.parametrize("qulap", [qudirect, qucpu, qucuda, qugpu, qusparse, qutridiagonal])
 def test_solve_poisson(N, qulap, skewh, zerotrace):
+
+    if qulap is None:
+        return None
 
     Pexact, Wexact = get_random_poisson_solution(N=N, skewh=skewh, seed=None, zerotrace=zerotrace)
 
