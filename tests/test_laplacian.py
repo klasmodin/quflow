@@ -23,7 +23,8 @@ if cuda_available:
             N = W.shape[-1]
             ham = DiagTriDiagOp(N, dtype=np.dtype(W.dtype))
             Wd = cp.asarray(W)
-            Pd = ham(Wd)
+            Pd = cp.zeros_like(Wd)
+            ham(Pd, Wd)
             return Pd.get()
 
     qucuda = CudaPoissonWrapper()
