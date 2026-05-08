@@ -19,6 +19,9 @@ qucuda = None
 if cuda_available:
     from quflow.experimental.cuda import DiagTriDiagOp
     class CudaPoissonWrapper(object):
+
+        __name__ = "qucuda"
+
         def solve_poisson(self, W):
             N = W.shape[-1]
             ham = DiagTriDiagOp(N, dtype=np.dtype(W.dtype))
@@ -246,7 +249,7 @@ def test_solve_poisson(N, qulap, skewh, zerotrace):
     except AttributeError:
         pass
 
-    np.testing.assert_allclose(P, Pexact, atol=1e-10, rtol=0)
+    np.testing.assert_allclose(P, Pexact, atol=1e-14*N**2, rtol=0)
 
 
 @pytest.mark.parametrize("N", [33, 65, 128])
