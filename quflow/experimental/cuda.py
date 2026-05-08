@@ -263,7 +263,7 @@ class DiagTriDiagOp(object):
       j = np.arange(0,N-m,dtype=np_dtype)
       d_ub = -2 * (s * (2 * j + 1 + m) - j * (j + m))
       if m==0:
-        d_ub[0] += 1/2
+        d_ub[0] -= 1/2
       
       # lower batch
       m = N-i
@@ -425,8 +425,12 @@ class DiagTriDiagOp(object):
     blocks  = (math.ceil(self.N / threads[0]),
                math.ceil(self.batch_count / threads[1]))
 
-
     self.extract_diag(blocks,threads,(W,self.N,self.batch_count,self.xr,self.xi))
+
+    # In case W is not tracefree, project to tracefree xi
+    self.scale_main_diag()
+
+
 # -------------------------------------------------------------------------------------- #
 
 # -------------------------------------------------------------------------------------- #
