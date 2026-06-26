@@ -83,8 +83,14 @@ def _compute_cpu_laplacian(N, bc=False, dtype=np.float64):
             lap[i, j, 1] = np.sqrt(((k + absm)*(N - k - absm))*(k*(N - k)))
 
     if bc:
+        # Old bc
         # lap[0, 0, 0] += 0.5
+
+        # Better bc (makes matrix definite)
         lap[0, 0, 0] -= 0.5
+
+        # Experimental bc (not working yet)
+        # lap[-1, -1, 1] = 0.0
 
     return lap
 
@@ -334,6 +340,9 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
                 P[j, i] = -np.conj(P[i, j])
         
         if m==0:
+            # Experimental bc
+            # P[-1, -1] = 0.0
+
             # Make sure the trace of P vanishes (corresponds to bc for laplacian)
             trP = P[0, 0]
             for k in range(1, N):
