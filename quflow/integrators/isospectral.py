@@ -375,7 +375,7 @@ def isomp_fixedpoint(W,
         Strang splitting updates applied before and after each basic step.
     stats: dict or None
         Dictionary to be filled in with integration statistics.
-    callback: function(W, dW, stats) or None (default)
+    callback: function(W, dW) or None (default)
         Callback function evaluated at the end of every step, 
         just before W is updated W += dW.
     tol: float or 'auto' (default)
