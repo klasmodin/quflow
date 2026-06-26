@@ -11,7 +11,7 @@ from .quantization import mat2shr
 from .transforms import shc2fun, shr2fun
 from .laplacian import solve_poisson
 from .integrators import isomp
-from .utils import elm2ind
+from .utils import elm2ind, berezin_multipliers
 from .geometry import hbar
 import warnings
 
@@ -37,8 +37,8 @@ def in_notebook():
 # GLOBAL VARIABLES
 # ----------------
 
-_default_qutypes = {'mat': None, 'funhalf': np.float32}
-_default_qutype2varname = {'mat': 'mat', 'fun': 'fun', 'shr': 'shr', 'shc': 'shc', 'funhalf': 'fun'}
+_default_qutypes = {'mat': None, 'fun': np.float32, 'funL2': np.float32}
+_default_qutype2varname = {'mat': 'mat', 'fun': 'fun', 'shr': 'shr', 'shc': 'shc', 'funhalf': 'fun', 'funL2': 'funL2', 'funL2half': 'funL2'}
 _pickled_argnames = ['qutypes', 'hamiltonian', 'forcing', 'integrator', 'callback', 'integrator_callback', 'strang_splitting']
 _info_args = ['info']
 
@@ -121,6 +121,9 @@ class QuSimulation(object):
             
             if 'fun' in self.qutypes and 'funhalf' in self.qutypes:
                 raise ValueError("Cannot have both fun and funhalf outputs.")
+
+            if 'funL2' in self.qutypes and 'funL2half' in self.qutypes:
+                raise ValueError("Cannot have both funL2 and funL2half outputs.")
 
             # Create or overwrite file
             try:
@@ -307,7 +310,7 @@ class QuSimulation(object):
                     omegac.append(mat2shc(Wi))
                 omegac = np.squeeze(np.array(omegac))
                 arr = omegac.astype(dtype)
-            elif qutype == 'fun' or qutype == 'funhalf':
+            elif 'fun' in qutype:
                 if isreal:
                     try:
                         omega = omegar
@@ -329,9 +332,13 @@ class QuSimulation(object):
                 arr = []
                 for omegai in omega.reshape((-1, omega.shape[-1])):
                     sh2fun = shr2fun if isreal else shc2fun
-                    if qutype == 'funhalf':
+                    sh2fun_args = dict()
+                    if 'half' in qutype:
                         omegai = omegai[...,:(N//2)**2]
-                    arr.append(sh2fun(omegai))
+                    if 'funL2' in qutype:
+                        sh2fun_args['berezin'] = False
+                        # omegai = omegai*berezin_multipliers(N=N)[:omegai.shape[-1]]
+                    arr.append(sh2fun(omegai, **sh2fun_args))
                 arr = np.squeeze(np.array(arr, dtype=dtype))
 
             yield qutype2varname[qutype], arr, qutype
@@ -493,21 +500,36 @@ def create_runfile(sim, runfilename: str = None):
             sim = QuSimulation(sim)
     
     filestr = """
+
 import numpy as np
 import quflow as qf
 import argparse
-from tqdm import tqdm
+
+try:
+    import cupy as cp
+except ImportError:
+    cuda_available = False
+else:
+    cuda_available = True if cp.is_available() else False
+
+if cuda_available:
+    from quflow.experimental.cuda import DiagTriDiagOp
+    from quflow.experimental.isospectral_cuda import IsompCUDA
+else:
+    print("Running on CPU")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-f", "--filename", help="Simfile name", type=str, default="{}") 
+parser.add_argument("-f", "--filename", help="HDF5 simfile", type=str, default={}) 
 parser.add_argument("-a", "--animate", help="Only create animation.", action="store_true")
 parser.add_argument("-s", "--simulate", help="Only simulate.", action="store_true")
 parser.add_argument("-t", "--simtime", help="Total simulation time.", type=float)
-parser.add_argument("--endtime", help="End simulation time.", type=float)
-parser.add_argument("--astride", help="Animation frame stride.", type=int, default=1)
+parser.add_argument("--compsum", help="Use compensated summation.", action="store_true")
+parser.add_argument("--tol", help="Tolerance for solver iterations.", type=float)
 args = parser.parse_args()
 
 filename = args.filename
+if filename is None:
+    raise ValueError("filename must be specified (valid hdf5 file)")
 
 # ---------- Externally defined code ----------
 
@@ -518,24 +540,35 @@ filename = args.filename
 # Load simulation from file
 mysim = qf.QuSimulation(filename)
 
-if args.simtime is not None:
-    mysim['simtime'] = np.float64(args.simtime)
+solve_kwargs = dict()
 
-if args.endtime is not None:
-    mysim['endtime'] = np.float64(args.endtime)
+if args.simtime is not None:
+    solve_kwargs['simtime'] = np.float64(args.simtime)
+
+if args.tol is not None:
+    solve_kwargs['tol'] = np.float64(args.tol)
+
+if args.compsum:
+    solve_kwargs['compsum'] = True
+
+if cuda_available and mysim['hamiltonian'] is qf.solve_poisson and mysim['integrator'] is qf.isomp:
+    print("Running on GPU")
+    W0 = mysim['mat', 0] 
+    N = W0.shape[-1]
+    isomp = IsompCUDA(N, dtype=W0.dtype)
+    solve_poisson = DiagTriDiagOp(N, dtype=np.dtype(complex_type))
+
+    solve_kwargs['hamiltonian'] = solve_poisson
+    solve_kwargs['integrator'] = isomp
 
 # Run simulation
 if not args.animate:
-    qf.solve(mysim)
+    qf.solve(mysim, **solve_kwargs)
 
 # Create animation
 if not args.simulate:
-    animfile = filename.replace(".hdf5",".mp4")
-    with qf.QuSimulation(filename) as mysim, qf.Animation(animfile) as anim:
-        for k in tqdm(range(0, len(mysim['time']), args.astride)):
-            t = mysim['time', k]
-            data = mysim['fun', k]
-            anim.update(data, time=t)
+    qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'])
+
 
 """.format(os.path.basename(sim.filename), sim['prerun'])
     if runfilename is None:
@@ -548,14 +581,21 @@ if not args.simulate:
 # SOLVE FUNCTION DEF
 # ----------------------
 
-def solve(W, stepsize=None, dt=None,
-          steps=None, simtime=None,
+def solve(W,
+          dt=None, 
+          stepsize=None, 
+          steps=None, 
+          simtime=None,
           endtime=None,
-          steps_out=None, dt_out=None,
+          steps_out=None, 
+          dt_out=None,
           integrator=None,
-          callback=None, callback_kwargs=None,
+          callback=None, 
+          callback_kwargs=None,
           integrator_callback=None,
-          progress_bar=True, progress_file=None, **kwargs):
+          progress_bar=True, 
+          progress_file=None, 
+          **kwargs):
     """
     High-level solve function.
 
@@ -622,34 +662,48 @@ def solve(W, stepsize=None, dt=None,
         else:
             callback = (callback, sim)
         for name, value in sim.args():
-            if name == 'dt' and dt is None:
-                dt = value
-            elif name == 'stepsize' and stepsize is None:
-                stepsize = value
-            elif name == 'steps' and steps is None:
-                steps = value
-            elif name == 'simtime' and simtime is None:
-                simtime = value
-            elif name == 'endtime' and endtime is None:
-                endtime = value
-            elif name == 'steps_out' and steps_out is None:
-                steps_out = value
-            elif name == 'inner_steps' and steps_out is None:
-                steps_out = value
-            elif name == 'dt_out' and dt_out is None:
-                dt_out = value
-            elif name == 'inner_time' and dt_out is None:
-                dt_out = value
-            elif name == 'integrator' and integrator is None:
-                integrator = value
-            elif (name == 'integrator_callback' or name == 'callback') and integrator_callback is None:
-                integrator_callback = value
-            elif name == 'callback_kwargs' and callback_kwargs is None:
-                callback_kwargs = value
-            elif name == 'progress_bar' and progress_bar is None:
-                progress_bar = value
-            elif name == 'progress_file' and progress_file is None:
-                progress_file = value
+            if name == 'dt':
+                if dt is None:
+                    dt = value
+            elif name == 'stepsize':
+                if stepsize is None:
+                    stepsize = value
+            elif name == 'steps':
+                if steps is None:
+                    steps = value
+            elif name == 'simtime':
+                if simtime is None:
+                    simtime = value
+            elif name == 'endtime':
+                if endtime is None:
+                    endtime = value
+            elif name == 'steps_out':
+                if steps_out is None:
+                    steps_out = value
+            elif name == 'inner_steps':
+                if steps_out is None:
+                    steps_out = value
+            elif name == 'dt_out':
+                if dt_out is None:
+                    dt_out = value
+            elif name == 'inner_time':
+                if dt_out is None:
+                    dt_out = value
+            elif name == 'integrator':
+                if integrator is None:
+                    integrator = value
+            elif (name == 'integrator_callback' or name == 'callback'):
+                if integrator_callback is None:
+                    integrator_callback = value
+            elif name == 'callback_kwargs':
+                if callback_kwargs is None:
+                    callback_kwargs = value
+            elif name == 'progress_bar':
+                if progress_bar is None:
+                    progress_bar = value
+            elif name == 'progress_file':
+                if progress_file is None:
+                    progress_file = value
             else:
                 # Add to kwargs
                 if name not in kwargs:

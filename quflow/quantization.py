@@ -1,11 +1,13 @@
 import numpy as np
-from .utils import elm2ind, complex_dtype, real_dtype
+from .utils import elm2ind, complex_dtype, real_dtype, berezin_multipliers
 from .laplacian.direct import compute_direct_laplacian
 from numba import njit, prange
 import os
 from scipy.linalg import eigh_tridiagonal
 from .io import save_basis, load_basis
 from scipy.sparse import dia_matrix
+import warnings
+
 
 # ----------------
 # GLOBAL VARIABLES
@@ -442,7 +444,7 @@ def get_basis(N, allow_compute=True, dtype=np.double):
     return basis
 
 
-def shr2mat(omega, N=-1):
+def shr2mat(omega, N=-1, berezin=False):
     """
     Convert real spherical harmonics to matrix.
 
@@ -470,12 +472,20 @@ def shr2mat(omega, N=-1):
 
     W_out = np.zeros((N, N), dtype=complex_dtype(omega.dtype))
     basis = get_basis(N, omega.dtype)
-    shr2mat_(omega, basis, W_out)
+    if berezin:
+        warnings.warn("Berezin scaling in shr2mat is ill adviced (it doesn't preserve energy or enstrophy)")
+        bw = berezin_multipliers(N, omega.dtype)
+        ind = np.nonzero(omega)
+        omegatmp = omega.copy()
+        omegatmp[ind] /= bw[ind]
+        shr2mat_(omegatmp, basis, W_out)
+    else:
+        shr2mat_(omega, basis, W_out)
 
     return W_out
 
 
-def mat2shr(W, elmax=-1):
+def mat2shr(W, elmax=-1, berezin=False):
     """
     Convert NxN complex matrix to real spherical harmonics.
 
@@ -501,11 +511,15 @@ def mat2shr(W, elmax=-1):
     omega = np.zeros(Nmax**2, dtype=real_dtype(W.dtype))
     basis = get_basis(N, dtype=omega.dtype)
     mat2shr_(W, basis, omega)
+    if berezin:
+        warnings.warn("Berezin scaling in mat2shr is ill adviced. Use in shr2fun instead (default).")
+        bw = berezin_multipliers(N, omega.dtype)
+        omega *= bw[:omega.shape[0]]
 
     return omega
 
 
-def shc2mat(omega, N=-1):
+def shc2mat(omega, N=-1, berezin=False):
     """
     Convert complex spherical harmonics to matrix.
 
@@ -530,12 +544,21 @@ def shc2mat(omega, N=-1):
 
     W_out = np.zeros((N, N), dtype=omega.dtype)
     basis = get_basis(N, dtype=real_dtype(W_out.dtype))
-    shc2mat_(omega, basis, W_out)
+
+    if berezin:
+        warnings.warn("Berezin scaling in shc2mat is ill adviced (it doesn't preserve energy or enstrophy)")
+        bw = berezin_multipliers(N, omega.dtype)
+        ind = np.nonzero(omega)
+        omegatmp = omega.copy()
+        omegatmp[ind] /= bw[ind]
+        shc2mat_(omegatmp, basis, W_out)
+    else:
+        shc2mat_(omega, basis, W_out)
 
     return W_out
 
 
-def mat2shc(W):
+def mat2shc(W, berezin=False):
     """
     Convert NxN complex matrix to complex spherical harmonics.
 
@@ -551,6 +574,11 @@ def mat2shc(W):
     omega = np.zeros(N**2, dtype=W.dtype)
     basis = get_basis(N, dtype=real_dtype(W.dtype))
     mat2shc_(W, basis, omega)
+
+    if berezin:
+        warnings.warn("Berezin scaling in mat2shc is ill adviced. Use in shc2fun instead (default).")
+        bw = berezin_multipliers(N, omega.dtype)
+        omega *= bw[:omega.shape[0]]
 
     return omega
 

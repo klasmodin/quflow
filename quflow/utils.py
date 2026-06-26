@@ -2,6 +2,7 @@ import numpy as np
 # import pyssht
 import os
 from numba import njit, prange
+from scipy.special import gammaln
 
 
 def complex_dtype(dt):
@@ -102,6 +103,36 @@ def elm2ind(el, m):
 	ind: int
 	"""
 	return el*el + el + m
+
+
+def berezin_multipliers(N, dtype=np.float64, el=None):
+	"""
+	Returns the spherical harmonics scalings $w_\ell = \sqrt{\prod_{j=0}^\ell \frac{N-j}{N+j}}$
+	which converts the Hoppe-Yau quantization T_N to the Berezin-Toeplitz quantization Q_N.
+
+	Parameters
+	----------
+	N: size of matrix
+	dtype: dtype of float
+	el: wavenumbers to include (defaults to ind2elm(np.arange(N**2)))
+	"""
+	if el is None:
+		ells, ms = ind2elm(np.arange(N**2))
+		ells = ells.astype(np.float64)
+	else:
+		ells = np.asarray(el, dtype=np.float64)
+
+	NN = np.float64(N)
+	
+	log_bw = 0.5 * (
+		gammaln(NN + 1)
+		+ gammaln(NN)
+		- gammaln(NN - ells)
+		- gammaln(NN + ells + 1)
+	)
+	bw = np.exp(log_bw)
+
+	return bw.astype(dtype)
 
 
 def cart2sph(x, y, z):

@@ -1,6 +1,6 @@
 import numpy as np
 from numba import njit, prange
-from .utils import complex_dtype, real_dtype
+from .utils import complex_dtype, real_dtype, berezin_multipliers
 
 try:
     from pyssht import ind2elm, forward, inverse
@@ -217,7 +217,7 @@ def fun2shc(f):
     return omega
 
 
-def shc2fun(omega, isreal=False, N=-1):
+def shc2fun(omega, isreal=False, N=-1, berezin=True):
     """
     Transform complex spherical harmonics signal to theta-phi function.
 
@@ -232,15 +232,16 @@ def shc2fun(omega, isreal=False, N=-1):
     N: int (optional)
         Bandwidth. If `N == -1` then the bandwidth is automatically inferred.
 
+    berezin: float (optional, default=True)
+        Use Berezin multipliers instead of Hoppe-Yau.
+
     Returns
     -------
     f: ndarray, shape (N, 2*N-1)
     """
 
     # Check that the input is correct
-    omega = np.ascontiguousarray(omega)
-    if omega.dtype is not complex:
-        omega = omega.astype(complex)
+    omega = np.ascontiguousarray(omega, dtype=complex_dtype(omega.dtype))
 
     if N == -1:
         # Compute bandwidth
@@ -254,6 +255,11 @@ def shc2fun(omega, isreal=False, N=-1):
 
     # Make sure things are ok
     assert omega.shape[0] == N**2, "It seems that omega does not have the right length."
+
+    # Berezin multipliers
+    if berezin:
+        bw = berezin_multipliers(N=N, dtype=real_dtype(omega.dtype))
+        omega = omega*bw[:omega.shape[0]]
 
     # Transform to function values
     f = inverse(omega, N, Reality=isreal)
@@ -413,7 +419,7 @@ def fun2shr(f):
     return shc2shr(fun2shc(f))
 
 
-def shr2fun(omega, N=-1):
+def shr2fun(omega, N=-1, **kwargs):
     """
     Transform real spherical harmonics signal to theta-phi function.
 
@@ -429,10 +435,10 @@ def shr2fun(omega, N=-1):
     -------
     f: ndarray, shape (N, 2*N-1)
     """
-    return shc2fun(shr2shc(omega), isreal=True, N=N)
+    return shc2fun(shr2shc(omega), isreal=True, N=N, **kwargs)
 
 
-def as_fun(data, N=-1):
+def as_fun(data, N=-1, **kwargs):
     """
     Take data as either `fun`, `img`, `omegar`, `omegac`, or `mat`
     and convert to `fun` (unless already).
@@ -441,6 +447,7 @@ def as_fun(data, N=-1):
     ----------
     data: ndarray
     N: bandwidth (optional)
+    **kwargs: extra arguments for shc2fun/shr2fun
 
     Returns
     -------
@@ -453,9 +460,9 @@ def as_fun(data, N=-1):
             if N == -1:
                 N = W.shape[0]
             if np.allclose(W, -W.conj().T):
-                fun = shr2fun(mat2shr(W), N)
+                fun = shr2fun(mat2shr(W), N, **kwargs)
             else:
-                fun = shc2fun(mat2shc(W), N)
+                fun = shc2fun(mat2shc(W), N, **kwargs)
         else:
             # Format is fun or img
             if data.dtype == np.uint8:
@@ -470,11 +477,11 @@ def as_fun(data, N=-1):
         if np.iscomplexobj(data):
             # Format is omegac
             omegac = data
-            fun = shc2fun(omegac) if N == -1 else shc2fun(omegac, N)
+            fun = shc2fun(omegac, **kwargs) if N == -1 else shc2fun(omegac, N, **kwargs)
         else:
             # Format is omegar
             omegar = data
-            fun = shr2fun(omegar) if N == -1 else shr2fun(omegar, N)
+            fun = shr2fun(omegar, **kwargs) if N == -1 else shr2fun(omegar, N, **kwargs)
 
     return fun
 
