@@ -482,7 +482,7 @@ class QuSimulation(object):
 # RUNFILE CREATION FUNCTION
 # -------------------------
 
-def create_runfile(sim, runfilename: str = None):
+def create_runfile(sim, runfilename: str = None, title=None):
     """
     Create cluster runfile from QuSimulation object.
 
@@ -567,7 +567,7 @@ if not args.animate:
 
 # Create animation
 if not args.simulate:
-    qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'], title=mysim['title'])
+    qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'], title='"""+title+"""')
 
 
 """.format(os.path.basename(sim.filename), sim['prerun'])
