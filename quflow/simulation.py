@@ -567,7 +567,7 @@ if not args.animate:
 
 # Create animation
 if not args.simulate:
-    qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'])
+    qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'], title=mysim['title'])
 
 
 """.format(os.path.basename(sim.filename), sim['prerun'])
