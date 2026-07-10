@@ -7,7 +7,7 @@ scipy>=1.6.0
 h5py>=2.10.0
 appdirs>=1.4.4
 quflow>=0.0.3
-ducc0>=0.36.0
+pyssht
 tqdm
 cartopy
 prettytable

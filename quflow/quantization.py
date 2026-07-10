@@ -91,7 +91,7 @@ def compute_basis(N, dtype=np.float64):
         n = N - m
         start_ind = N*(N+1)//2 - n*(n+1)//2
         end_ind = start_ind + n
-        v2, w2 = eigh_tridiagonal(lap[1, start_ind:end_ind], lap[0, start_ind+1:end_ind])
+        v2, w2 = eigh_tridiagonal(lap[1, start_ind:end_ind], lap[0, start_ind+1:end_ind], lapack_driver="stemr")
 
         # Rescale to get correct L2 scaling
         w2 *= np.sqrt(N)
