@@ -1,3 +1,4 @@
+import h5py
 import numpy as np
 import pytest
 import quflow as qf
@@ -169,3 +170,58 @@ def test_solve_restart(W, tmpdir):
 
 
 
+
+
+def _seeded_skewh(N, seed=0):
+    rng = np.random.default_rng(seed)
+    A = rng.standard_normal((N, N)) + 1j*rng.standard_normal((N, N))
+    return A - A.conj().T
+
+
+def test_unpicklable_logger_warns_and_reopens(tmp_path):
+    # A logger defined locally cannot be pickled (AttributeError up to Python 3.13,
+    # PicklingError from 3.14). The simulation should warn, keep logging in memory,
+    # and be possible to reopen with the logger supplied again.
+    filename = tmp_path / "testsim.hdf5"
+    W = _seeded_skewh(16)
+
+    def first_column(W):
+        return W[:, 0]
+
+    with pytest.warns(UserWarning, match="could not be pickled"):
+        sim = QuSimulation(filename, overwrite=True, state=W, loggers={'col': first_column})
+    sim(W=W, delta_time=0.1)
+    assert sim['col'].shape == (2, 16)
+
+    # Reopening without loggers must not crash, but warn that none are stored
+    with pytest.warns(UserWarning, match="No loggers are stored"):
+        sim2 = QuSimulation(filename)
+    assert sim2.loggers == {}
+
+    # Reopening with the logger supplied again continues logging
+    sim3 = QuSimulation(filename, loggers={'col': first_column})
+    sim3(W=2*W, delta_time=0.1)
+    np.testing.assert_equal(sim3['col', -1], 2*W[:, 0])
+    assert sim3['col'].shape == (3, 16)
+
+
+def test_picklable_logger_restored_on_reopen(tmp_path):
+    filename = tmp_path / "testsim.hdf5"
+    W = _seeded_skewh(16)
+    QuSimulation(filename, overwrite=True, state=W, loggers={'normL2': qf.geometry.norm_L2})
+
+    sim = QuSimulation(filename)
+    assert sim.loggers == {'normL2': qf.geometry.norm_L2}
+
+
+def test_unpicklable_hamiltonian_stored_by_name(tmp_path):
+    # Functions that cannot be pickled are stored by name instead
+    filename = tmp_path / "testsim.hdf5"
+    sim = QuSimulation(filename, overwrite=True, state=_seeded_skewh(8))
+
+    def myham(W):
+        return qf.solve_poisson(W)
+
+    sim['hamiltonian'] = myham
+    with h5py.File(filename, "r") as f:
+        assert f[sim.args_datapath].attrs['hamiltonian'] == 'myham'

@@ -136,8 +136,11 @@ class QuSimulation(object):
                 f[self.datapath].attrs["qutypes"] = np.array([pickle.dumps(self.qutypes)])
                 try:
                     myp = pickle.dumps(self.loggers)
-                except AttributeError:
-                    pass
+                except (AttributeError, pickle.PicklingError) as e:
+                    # AttributeError up to Python 3.13, PicklingError from 3.14
+                    warnings.warn("Loggers could not be pickled and are not saved in {} ({}). "
+                                  "Pass them again via `loggers` when reopening the simulation."
+                                  .format(self.filename, e))
                 else:
                     f[self.datapath].attrs['loggers'] = np.array([myp])
                 self.args_datapath = self.datapath + "args/"
@@ -157,8 +160,13 @@ class QuSimulation(object):
                 self.qutypes = pickle.loads(f[self.datapath].attrs["qutypes"][0])
                 if "N" in f[self.datapath].attrs and state is not None:
                     raise ValueError(self.filename + " has already been initialized with W.")
-                myp = f[self.datapath].attrs['loggers'][0]
-                self.loggers = pickle.loads(myp)
+                if 'loggers' in f[self.datapath].attrs:
+                    myp = f[self.datapath].attrs['loggers'][0]
+                    self.loggers = pickle.loads(myp)
+                elif loggers is None:
+                    # Loggers could not be pickled when the file was created
+                    warnings.warn("No loggers are stored in {}. Pass them via `loggers` "
+                                  "to continue logging.".format(self.filename))
                 self.args_datapath = self.datapath + "args/"
                 if qutypes is not None:
                     raise ValueError(self.filename + " has already been initialized with qutypes.")
@@ -210,7 +218,7 @@ class QuSimulation(object):
                 else:
                     try:
                         myp = pickle.dumps(value)
-                    except AttributeError:
+                    except (AttributeError, pickle.PicklingError):
                         myp = value.__name__
                         f[self.args_datapath].attrs[name] = myp
                     else:
