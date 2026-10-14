@@ -23,3 +23,13 @@ data/logo.afdesign
 quflow/splittingflow.py
 quflow/integrators/isomp-old.py
 quflow/templates/run_reverse_TEMPLATE.py
+
+# Testing / coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Documentation build
+docs/_build/
+docs/api/generated/

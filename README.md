@@ -49,15 +49,16 @@ can be installed via
 ```
 > conda env create -f quflow-env.yaml
 ```
-If you're running a Mac with the Apple Silicon hardware, 
-you might want to run the following command after:
+The environment uses the default BLAS/LAPACK from conda-forge (OpenBLAS), which works on all platforms.
+For a significant speed-up, switch to a hardware-optimized BLAS after creating the environment.
+
+On a Mac with Apple Silicon, use the [latest version of Apple's Accelerate](https://conda-forge.org/news/2025/07/31/new-accelerate-macos/):
 ```
-> conda install "libblas=*=*accelerate"
+> conda install -n quflow "libblas=*=*_newaccelerate"
 ```
-This enables hardware accelerated BLAS and LAPACK routines, which gives a significant speed-up.
-Even better, to use the [latest version of optimized LAPACK](https://conda-forge.org/news/2025/07/31/new-accelerate-macos/):
+On x86_64 hardware (Linux or Windows), use Intel MKL:
 ```
-> conda install libblas=*=*_newaccelerate
+> conda install -n quflow "libblas=*=*mkl"
 ```
 
 ## Quick Start
