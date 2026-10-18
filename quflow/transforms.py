@@ -576,12 +576,6 @@ def as_fun(data, N=-1, **kwargs):
     Returns
     -------
     fun: ndarray(shape=(N, 2*N-1), dtype=float or complex)
-
-    Notes
-    -----
-    For a non-skew-Hermitian `mat`, and for `omegac` with `N` given, `N` is
-    passed as the `isreal` argument of :func:`shc2fun`, so the result is
-    real (the imaginary part is lost).
     """
     if data.ndim == 2:
         if data.shape[0] == data.shape[1] and np.iscomplexobj(data):
@@ -590,9 +584,9 @@ def as_fun(data, N=-1, **kwargs):
             if N == -1:
                 N = W.shape[0]
             if np.allclose(W, -W.conj().T):
-                fun = shr2fun(mat2shr(W), N, **kwargs)
+                fun = shr2fun(mat2shr(W), N=N, **kwargs)
             else:
-                fun = shc2fun(mat2shc(W), N, **kwargs)
+                fun = shc2fun(mat2shc(W), N=N, **kwargs)
         else:
             # Format is fun or img
             if data.dtype == np.uint8:
@@ -607,11 +601,11 @@ def as_fun(data, N=-1, **kwargs):
         if np.iscomplexobj(data):
             # Format is omegac
             omegac = data
-            fun = shc2fun(omegac, **kwargs) if N == -1 else shc2fun(omegac, N, **kwargs)
+            fun = shc2fun(omegac, N=N, **kwargs)
         else:
             # Format is omegar
             omegar = data
-            fun = shr2fun(omegar, **kwargs) if N == -1 else shr2fun(omegar, N, **kwargs)
+            fun = shr2fun(omegar, N=N, **kwargs)
 
     return fun
 

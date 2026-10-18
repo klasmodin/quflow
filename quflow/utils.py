@@ -4,7 +4,6 @@ sampling grid, coordinate conversions and time units.
 """
 import numpy as np
 # import pyssht
-import os
 from numba import njit, prange
 from scipy.special import gammaln
 
@@ -195,10 +194,10 @@ def cart2sph(x, y, z):
 
 	Parameters
 	----------
-	x: ndarray
-	y: ndarray
-	z: ndarray
-		Coordinates (arrays; scalar input is not supported).
+	x: float or ndarray
+	y: float or ndarray
+	z: float or ndarray
+		Coordinates.
 
 	Returns
 	-------
@@ -208,7 +207,7 @@ def cart2sph(x, y, z):
 	"""
 	phi = np.arctan2(y, x)
 	theta = np.arctan2(np.sqrt(x * x + y * y), z)
-	phi[phi < 0] += 2 * np.pi
+	phi = phi + 2 * np.pi * (phi < 0)  # Works for both arrays and scalars
 
 	return theta, phi
 
@@ -310,55 +309,3 @@ def seconds2qtime(t, N):
 	# return t/np.sqrt(16.*np.pi)*N**(3./2.)
 	hbar = 2.0/np.sqrt(N**2-1)
 	return t/hbar
-
-
-def run_cluster(filename, time, inner_time, step_size):
-	"""
-	Write a run script and a SLURM batch script for a cluster simulation (legacy).
-
-	Fills in the templates in ``quflow/templates`` and writes
-	``run_<simname>.py`` and ``vera2_<simname>.sh`` next to `filename`.
-	Superseded by :mod:`quflow.cluster`; the current templates no longer
-	contain most of the placeholders filled in here.
-
-	Parameters
-	----------
-	filename : str
-		Simulation file (``*.hdf5``).
-	time : float
-		Simulation time.
-	inner_time : float
-		Time between saved states.
-	step_size : float
-		Time step.
-
-	Returns
-	-------
-	None
-	"""
-	from . import templates
-
-	# Read run file as string
-	with open(templates.__file__.replace("__init__.py","run_TEMPLATE.py"), 'r') as run_file:
-		run_str = run_file.read()\
-			.replace('_FILENAME_', filename)\
-			.replace('_SIMTIME_', str(time))\
-			.replace('_INNER_TIME_', str(inner_time))\
-			.replace('_STEP_SIZE_', str(step_size))\
-			.replace('_SIMULATE_', 'True')\
-			.replace('_ANIMATE_', 'True')
-
-	# Read vera file as string
-	with open(templates.__file__.replace("__init__.py","vera2_TEMPLATE.sh"), 'r') as vera_file:
-		simname = os.path.split(filename)[1].replace(".hdf5", "")
-		vera_str = vera_file.read()\
-			.replace('$SIMNAME', simname)\
-			.replace('$NO_CORES', '16')
-
-	# Write run file
-	with open(os.path.join(os.path.split(filename)[0], "run_"+simname+".py"), 'w') as run_file:
-		run_file.write(run_str)
-
-	# Write vera file
-	with open(os.path.join(os.path.split(filename)[0], "vera2_"+simname+".sh"), 'w') as vera_file:
-		vera_file.write(vera_str)

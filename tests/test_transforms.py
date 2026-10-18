@@ -116,7 +116,6 @@ def test_img_round_trip(rng):
     np.testing.assert_allclose(qf.img2fun(img, lim=lim), f, rtol=0, atol=2*lim/255)
 
 
-@pytest.mark.xfail(strict=True, reason="as_fun passes N as the `isreal` argument of shc2fun")
 def test_as_fun_non_skewh_matrix(rng):
     N = 6
     W = rng.standard_normal((N, N)) + 1j*rng.standard_normal((N, N))
@@ -131,3 +130,21 @@ def test_utils_dtypes_time_and_berezin():
     el = qf.ind2elm(np.arange(N**2))[0]
     expected = [np.sqrt(np.prod([(N - j)/(N + j) for j in range(1, l + 1)])) for l in el]
     np.testing.assert_allclose(qf.berezin_multipliers(N), expected, rtol=1e-12)
+
+
+def test_as_fun_complex_coefficients_with_N(rng):
+    N = 6
+    omegac = rng.standard_normal(N**2) + 1j*rng.standard_normal(N**2)  # not a real function
+    f = qf.as_fun(omegac, N=N)
+    assert np.iscomplexobj(f)
+    np.testing.assert_allclose(f, qf.shc2fun(omegac, N=N), rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("xyz, expected", [
+    ((1.0, 0.0, 0.0), (np.pi/2, 0.0)),
+    ((0.0, -1.0, 0.0), (np.pi/2, 3*np.pi/2)),
+    ((0.0, 0.0, -2.0), (np.pi, 0.0)),
+])
+def test_cart2sph_scalar(xyz, expected):
+    theta, phi = qf.cart2sph(*xyz)
+    np.testing.assert_allclose((theta, phi), expected, rtol=0, atol=1e-15)
