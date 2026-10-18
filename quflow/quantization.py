@@ -77,8 +77,7 @@ def basis_break_index(absm, N):
     Parameters
     ----------
     absm: int or np.array of int
-        Diagonal ``|m|``, ``0 <= absm <= N``. Note: an array argument is
-        modified in place (decremented by one).
+        Diagonal ``|m|``, ``0 <= absm <= N``.
     N: int
         Size of the matrices.
 
@@ -86,7 +85,7 @@ def basis_break_index(absm, N):
     -------
     int or np.array of int
     """
-    absm -= 1
+    absm = absm - 1  # New array/value: do not modify the input
     ind = absm + 2*absm**2 - 6*absm*N + 6*N**2
     ind *= 1 + absm
     return ind // 6
@@ -567,6 +566,7 @@ def get_basis(N, allow_compute=True, dtype=np.double):
     global _basis_cache
 
     basis = None
+    dtype = np.dtype(dtype)  # So that e.g. np.double and np.dtype('float64') share a cache entry
 
     # First look in the cache and quickly return if found
     if (N, dtype) in _basis_cache:
@@ -650,7 +650,7 @@ def shr2mat(omega, N=-1, berezin=False):
     #         omega = omega[:N**2]
 
     W_out = np.zeros((N, N), dtype=complex_dtype(omega.dtype))
-    basis = get_basis(N, omega.dtype)
+    basis = get_basis(N, dtype=omega.dtype)
     if berezin:
         warnings.warn("Berezin scaling in shr2mat is ill adviced (it doesn't preserve energy or enstrophy)")
         bw = berezin_multipliers(N, omega.dtype)
@@ -676,8 +676,9 @@ def mat2shr(W, elmax=-1, berezin=False):
         Skew-Hermitian matrix. Only the diagonal and the lower triangle are
         read.
     elmax: int (optional)
-        Maximum value of el. Note: the length of the result is currently
-        not ``(elmax+1)**2`` as intended; see Notes.
+        Maximum value of el. Only the ``(elmax+1)**2`` coefficients with
+        ``el <= elmax`` are computed and returned. Default (-1) is all,
+        ``elmax = N-1``.
     berezin : bool, optional
         If True, multiply the coefficients by
         :func:`quflow.utils.berezin_multipliers`, i.e., return coefficients
@@ -688,14 +689,8 @@ def mat2shr(W, elmax=-1, berezin=False):
     Returns
     -------
     omega: ndarray(shape=(N**2,), dtype=float)
-        Real spherical-harmonic coefficients (a new array).
-
-    Notes
-    -----
-    With ``elmax > 0`` the result has length ``(elmax+1)**4`` instead of
-    ``(elmax+1)**2``: it contains the coefficients up to
-    ``el = (elmax+1)**2 - 1``, or, if ``(elmax+1)**4 >= N**2``, all ``N**2``
-    coefficients followed by zeros. ``elmax = 0`` is ignored.
+        Real spherical-harmonic coefficients (a new array), of length
+        ``(min(elmax, N-1)+1)**2``.
     """
 
     assert np.iscomplexobj(W), "W must be a complex array."
@@ -703,8 +698,8 @@ def mat2shr(W, elmax=-1, berezin=False):
     N = W.shape[-1]
 
     Nmax = N
-    if elmax > 0:
-        Nmax = (elmax+1)**2
+    if elmax >= 0:
+        Nmax = min(elmax + 1, N)
 
     omega = np.zeros(Nmax**2, dtype=real_dtype(W.dtype))
     basis = get_basis(N, dtype=omega.dtype)

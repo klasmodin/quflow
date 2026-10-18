@@ -205,3 +205,53 @@ def test_basis_layout():
         start = qf.basis_break_index(m, N)
         B = basis[start:start + (N-m)**2].reshape(N-m, N-m)
         np.testing.assert_allclose(B.T @ B, N*np.eye(N-m), rtol=0, atol=1e-12)
+
+
+# --- Regression tests for fixed bugs -------------------------------------------
+
+@pytest.mark.parametrize("elmax", [0, 1, 3, 8, 20])
+def test_mat2shr_elmax(elmax, random_shr):
+    N = 9
+    omega = random_shr(N, zero_mean=False)
+    W = qf.shr2mat(omega)
+    n = min(elmax + 1, N)**2
+    result = qf.mat2shr(W, elmax=elmax)
+    assert result.shape == (n,)
+    np.testing.assert_allclose(result, omega[:n], rtol=0, atol=1e-13)
+
+
+def test_shr2mat_uses_basis_of_input_dtype(monkeypatch, random_shr):
+    import quflow.quantization as quant
+    requested = []
+    get_basis = quant.get_basis
+
+    def recording_get_basis(N, allow_compute=True, dtype=np.double):
+        requested.append(np.dtype(dtype))
+        return get_basis(N, allow_compute=allow_compute, dtype=dtype)
+
+    monkeypatch.setattr(quant, "get_basis", recording_get_basis)
+    omega = random_shr(5).astype(np.float32)
+    W = qf.shr2mat(omega)
+    assert W.dtype == np.complex64
+    assert requested == [np.dtype(np.float32)]
+    # Single precision round trip
+    np.testing.assert_allclose(qf.mat2shr(W), omega, rtol=0, atol=1e-5)
+
+
+def test_get_basis_cached_once_per_dtype():
+    import quflow.quantization as quant
+    N = 13
+    for key in [k for k in quant._basis_cache if k[0] == N]:
+        del quant._basis_cache[key]
+    b1 = quant.get_basis(N)                          # default dtype np.double
+    b2 = quant.get_basis(N, dtype=np.dtype("float64"))
+    b3 = quant.get_basis(N, dtype=np.float64)
+    assert b1 is b2 is b3
+    assert len([k for k in quant._basis_cache if k[0] == N]) == 1
+
+
+def test_basis_break_index_does_not_modify_input():
+    N = 9
+    absm = np.arange(N+1)
+    qf.basis_break_index(absm, N)
+    np.testing.assert_array_equal(absm, np.arange(N+1))
