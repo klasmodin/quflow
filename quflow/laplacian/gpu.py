@@ -93,7 +93,7 @@ dot_gpu_ = dot_gpu_generic_
 
 
 @njit(parallel=True, error_model='numpy', fastmath=True)
-def solve_gpu_generic_(lap, W, P, buffer_float, buffer_complex):
+def solve_gpu_generic_(lap, W, P, buffer_float, buffer_complex, remove_trace):
     """
     Function for solving the quantized
     Poisson equation (or more generally the equation defined by
@@ -112,6 +112,10 @@ def solve_gpu_generic_(lap, W, P, buffer_float, buffer_complex):
         Float buffer.
     buffer_complex: ndarray(shape=(N, N), dtype=complex)
         Complex buffer.
+    remove_trace: bool
+        Whether to remove the trace of the solution (for the singular Poisson
+        equation; the trace of the right-hand side must then be removed by the
+        caller). Use False for non-singular operators.
     """
     N = W.shape[0]
 
@@ -168,9 +172,10 @@ def solve_gpu_generic_(lap, W, P, buffer_float, buffer_complex):
             P_flat[k] = (buffer_complex_flat[k] - lap_flat[k+stride, 1]*P_flat[k+stride])/buffer_float_flat[k]
 
     # Make sure the trace of P vanishes (corresponds to bc for laplacian)
-    trP = P_flat[::N+1].sum()
-    trP /= N
-    P_flat[::N+1] -= trP
+    if remove_trace:
+        trP = P_flat[::N+1].sum()
+        trP /= N
+        P_flat[::N+1] -= trP
 
     # trP = P[0, 0]
     # for k in range(1, N):
@@ -183,7 +188,7 @@ def solve_gpu_generic_(lap, W, P, buffer_float, buffer_complex):
 
 
 @njit(parallel=True, error_model='numpy', fastmath=True)
-def solve_gpu_generic2_(lap, W, P, buffer_float, buffer_complex):
+def solve_gpu_generic2_(lap, W, P, buffer_float, buffer_complex, remove_trace):
     """
 
     Parameters
@@ -198,6 +203,10 @@ def solve_gpu_generic2_(lap, W, P, buffer_float, buffer_complex):
         Float buffer.
     buffer_complex: ndarray(shape=(N**2,), dtype=complex)
         Complex buffer.
+    remove_trace: bool
+        Whether to remove the trace of the solution (for the singular Poisson
+        equation; the trace of the right-hand side must then be removed by the
+        caller). Use False for non-singular operators.
     """
     N = W.shape[-1]
     lap_flat = lap.reshape((N**2, 2))
@@ -248,15 +257,16 @@ def solve_gpu_generic2_(lap, W, P, buffer_float, buffer_complex):
             val_float = lap_flat[k, 1]
 
     # Make sure the trace of P vanishes (corresponds to bc for laplacian)
-    trP = P_flat[::N+1].sum()
-    trP /= N
-    P_flat[::N+1] -= trP
+    if remove_trace:
+        trP = P_flat[::N+1].sum()
+        trP /= N
+        P_flat[::N+1] -= trP
 
     return P
 
 
 @njit(parallel=True, error_model='numpy', fastmath=True)
-def solve_gpu_generic3_(lap, W, P, buffer_float, buffer_complex):
+def solve_gpu_generic3_(lap, W, P, buffer_float, buffer_complex, remove_trace):
     """
     Function for solving the quantized
     Poisson equation (or more generally the equation defined by
@@ -275,6 +285,10 @@ def solve_gpu_generic3_(lap, W, P, buffer_float, buffer_complex):
         Float buffer.
     buffer_complex: ndarray(shape=(N, N), dtype=complex)
         Complex buffer.
+    remove_trace: bool
+        Whether to remove the trace of the solution (for the singular Poisson
+        equation; the trace of the right-hand side must then be removed by the
+        caller). Use False for non-singular operators.
     """
     N = W.shape[0]
 
@@ -347,15 +361,16 @@ def solve_gpu_generic3_(lap, W, P, buffer_float, buffer_complex):
             P_rec[k, m] = (buffer_complex_rec[k, m] - lap_rec[k+1, m, 1]*P_rec[k+1, m])/buffer_float_rec[k, m]
 
     # Make sure the trace of P vanishes (corresponds to bc for laplacian)
-    trP = P_flat[::N+1].sum()
-    trP /= N
-    P_flat[::N+1] -= trP
+    if remove_trace:
+        trP = P_flat[::N+1].sum()
+        trP /= N
+        P_flat[::N+1] -= trP
 
     return P
 
 
 @njit(parallel=True, error_model='numpy', fastmath=True)
-def solve_gpu_generic4_(lap, W, P, buffer_float, buffer_complex):
+def solve_gpu_generic4_(lap, W, P, buffer_float, buffer_complex, remove_trace):
     """
     Function for solving the quantized
     Poisson equation (or more generally the equation defined by
@@ -374,6 +389,10 @@ def solve_gpu_generic4_(lap, W, P, buffer_float, buffer_complex):
         Float buffer.
     buffer_complex: ndarray(shape=(N, N), dtype=complex)
         Complex buffer.
+    remove_trace: bool
+        Whether to remove the trace of the solution (for the singular Poisson
+        equation; the trace of the right-hand side must then be removed by the
+        caller). Use False for non-singular operators.
     """
     N = W.shape[0]
 
@@ -446,9 +465,10 @@ def solve_gpu_generic4_(lap, W, P, buffer_float, buffer_complex):
         P_rec[k, :] = (buffer_complex_rec[k, :] - lap_rec[k+1, :, 1]*P_rec[k+1, :])/buffer_float_rec[k, :]
 
     # Make sure the trace of P vanishes (corresponds to bc for laplacian)
-    trP = P_flat[::N+1].sum()
-    trP /= N
-    P_flat[::N+1] -= trP
+    if remove_trace:
+        trP = P_flat[::N+1].sum()
+        trP /= N
+        P_flat[::N+1] -= trP
 
     return P
 
@@ -487,6 +507,25 @@ def allocate_buffer(W):
     buffer_float = W.real.copy()
     P_out = W.copy()
     _gpu_buffer_cache[(N, W.dtype)] = {'complex': buffer_complex, 'float': buffer_float, 'P': P_out}
+
+
+def _get_buffer(W):
+    """
+    Return the buffers for matrices like `W`, allocating them if needed.
+
+    Parameters
+    ----------
+    W : ndarray, shape (N, N), complex
+
+    Returns
+    -------
+    dict
+        Buffers with keys ``'complex'``, ``'float'`` and ``'P'``.
+    """
+    key = (W.shape[0], W.dtype)
+    if key not in _gpu_buffer_cache:
+        allocate_buffer(W)
+    return _gpu_buffer_cache[key]
 
 
 def laplacian(N, bc=False, dtype=np.float64):
@@ -550,13 +589,14 @@ def solve_poisson(W):
     N = W.shape[0]
     lap = laplacian(N, bc=True, dtype=type(W[0, 0].real))
 
-    if (N, W.dtype) not in _gpu_buffer_cache or W.dtype != _gpu_buffer_cache[(N, W.dtype)]['complex'].dtype:
-        allocate_buffer(W)
+    buffer = _get_buffer(W)
 
-    P = _gpu_buffer_cache[(N, W.dtype)]['P']
-    solve_gpu_(lap, W, P,
-               _gpu_buffer_cache[(N, W.dtype)]['float'],
-               _gpu_buffer_cache[(N, W.dtype)]['complex'])
+    # The Laplacian is singular: remove the trace (circulation) of W, and of P below
+    W = W.copy()
+    W.flat[::N+1] -= np.trace(W)/N
+
+    P = buffer['P']
+    solve_gpu_(lap, W, P, buffer['float'], buffer['complex'], True)
 
     return P
 
@@ -582,12 +622,10 @@ def solve_heat(h_times_nu, W0):
 
     N = W0.shape[0]
 
-    if (N, h_times_nu) not in _gpu_heat_cache:
+    key = (N, h_times_nu, W0.dtype)
+    if key not in _gpu_heat_cache:
         # Get cpu laplacian
         lap = laplacian(N, bc=False, dtype=type(W0[0, 0].real))
-
-        # Allocate buffer
-        allocate_buffer(W0)
 
         # Get cpu operator for backward Euler
         heat = lap.copy()
@@ -596,14 +634,13 @@ def solve_heat(h_times_nu, W0):
         heat -= h_times_nu*lap
 
         # Store in cache
-        _gpu_heat_cache[(N, h_times_nu)] = heat
+        _gpu_heat_cache[key] = heat
     else:
-        heat = _gpu_heat_cache[(N, h_times_nu)]
+        heat = _gpu_heat_cache[key]
 
-    Wh = _gpu_buffer_cache[(N, W0.dtype)]['P']
-    solve_gpu_(heat, W0, Wh,
-               _gpu_buffer_cache[(N, W0.dtype)]['float'],
-               _gpu_buffer_cache[(N, W0.dtype)]['complex'])
+    buffer = _get_buffer(W0)
+    Wh = buffer['P']
+    solve_gpu_(heat, W0, Wh, buffer['float'], buffer['complex'], False)
 
     return Wh
 
@@ -626,13 +663,11 @@ def solve_helmholtz(W, alpha=1.0):
 
     N = W.shape[0]
 
-    if (N, alpha) not in _gpu_helmholtz_cache:
+    key = (N, alpha, W.dtype)
+    if key not in _gpu_helmholtz_cache:
 
         # Get cpu laplacian
         lap = laplacian(N, bc=False, dtype=type(W[0, 0].real))
-
-        # Allocate buffer
-        allocate_buffer(W)
 
         # Get cpu operator for backward Euler
         helmholtz = lap.copy()
@@ -641,14 +676,13 @@ def solve_helmholtz(W, alpha=1.0):
         helmholtz -= alpha*lap
 
         # Store in cache
-        _gpu_helmholtz_cache[(N, alpha)] = helmholtz
+        _gpu_helmholtz_cache[key] = helmholtz
     else:
-        helmholtz = _gpu_helmholtz_cache[(N, alpha)]
+        helmholtz = _gpu_helmholtz_cache[key]
 
-    P = _gpu_buffer_cache[(N, W.dtype)]['P']
-    solve_gpu_(helmholtz, W, P,
-               _gpu_buffer_cache[(N, W.dtype)]['float'],
-               _gpu_buffer_cache[(N, W.dtype)]['complex'])
+    buffer = _get_buffer(W)
+    P = buffer['P']
+    solve_gpu_(helmholtz, W, P, buffer['float'], buffer['complex'], False)
 
     return P
 
@@ -682,13 +716,11 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
 
     N = W0.shape[0]
 
-    if (N, h, nu, alpha) not in _gpu_viscdamp_cache:
+    key = (N, h, nu, alpha, theta, W0.dtype)
+    if key not in _gpu_viscdamp_cache:
 
         # Get cpu laplacian
         lap = laplacian(N, bc=False, dtype=type(W0[0, 0].real))
-
-        # Allocate buffer
-        allocate_buffer(W0)
 
         # Get cpu operator for backward Euler
         viscdamp = lap.copy()
@@ -697,11 +729,12 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
         viscdamp -= (h*nu*theta)*lap
 
         # Store in cache
-        _gpu_viscdamp_cache[(N, h, nu, alpha)] = viscdamp
+        _gpu_viscdamp_cache[key] = viscdamp
     else:
-        viscdamp = _gpu_viscdamp_cache[(N, h, nu, alpha)]
+        viscdamp = _gpu_viscdamp_cache[key]
 
-    Wh = _gpu_buffer_cache[(N, W0.dtype)]['P']
+    buffer = _get_buffer(W0)
+    Wh = buffer['P']
 
     # Prepare right hand side in Crank-Nicolson
     if theta == 1:
@@ -712,8 +745,6 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
     if force is not None:
         Wrhs += h*force
 
-    solve_gpu_(viscdamp, Wrhs, Wh,
-               _gpu_buffer_cache[(N, W0.dtype)]['float'],
-               _gpu_buffer_cache[(N, W0.dtype)]['complex'])
+    solve_gpu_(viscdamp, Wrhs, Wh, buffer['float'], buffer['complex'], False)
 
     return Wh

@@ -184,7 +184,7 @@ dot_direct_ = dot_direct_skewh_
 
 
 @njit(parallel=True)
-def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
+def solve_direct_skewh_(lap, W, P, vtmp, ytmp, remove_trace):
     """
     Highly optimized function for solving the quantized
     Poisson equation (or more generally the equation defined by
@@ -202,6 +202,10 @@ def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
         Temporary float memory needed.
     ytmp: ndarray(shape=(N*(N+1)/2,), dtype=complex)
         Temporary complex memory needed.
+    remove_trace: bool
+        Whether to remove the trace of the right-hand side and of the
+        solution (for the singular Poisson equation). Use False for
+        non-singular operators.
     """
     N = W.shape[0]
 
@@ -217,7 +221,7 @@ def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
         vk = b[0]
         v[0] = vk
         fk = W[0, m]
-        if m == 0:
+        if m == 0 and remove_trace:
             # Compute circulation (scaled trace) of W matrix
             trW = W[0, 0]
             for k in range(1, N):
@@ -231,7 +235,7 @@ def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
         for k in range(1, n):
             lk = a[k]/vk
             fk = W[k, m+k]
-            if m == 0:
+            if m == 0 and remove_trace:
                 fk -= trW
             yk = fk - lk*yk
             y[k] = yk
@@ -249,7 +253,7 @@ def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
             if m != 0:
                 P[m+k, k] = -np.conj(pk)
 
-        if m == 0:
+        if m == 0 and remove_trace:
             # Make sure the trace of P vanishes (corresponds to bc for laplacian)
             trP = P[0, 0]
             for k in range(1, N):
@@ -260,7 +264,7 @@ def solve_direct_skewh_(lap, W, P, vtmp, ytmp):
 
 
 @njit(parallel=False)
-def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
+def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp, remove_trace):
     """
     Highly optimized function for solving the quantized
     Poisson equation for non-skew-Hermitian `W` and `P`
@@ -278,6 +282,10 @@ def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
         Temporary float memory needed.
     ytmp: ndarray(shape=(N*(N+1)/2,), dtype=complex)
         Temporary complex memory needed.
+    remove_trace: bool
+        Whether to remove the trace of the right-hand side and of the
+        solution (for the singular Poisson equation). Use False for
+        non-singular operators.
     """
     N = W.shape[0]
 
@@ -295,7 +303,7 @@ def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
         v[0] = vk
         if m < 0:
             fk = W[absm, 0]
-        elif m == 0:
+        elif m == 0 and remove_trace:
             # Compute circulation (scaled trace) of W matrix
             trW = W[0, 0]
             for k in range(1, N):
@@ -311,7 +319,7 @@ def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
             lk = a[k]/vk
             if m < 0:
                 fk = W[absm+k, k]
-            elif m == 0:
+            elif m == 0 and remove_trace:
                 fk = W[k, k] - trW
             else:
                 fk = W[k, absm+k]
@@ -333,7 +341,7 @@ def solve_direct_nonskewh_(lap, W, P, vtmp, ytmp):
             else:
                 P[k, absm+k] = pk
 
-        if m == 0:
+        if m == 0 and remove_trace:
             # Make sure the trace of P vanishes (corresponds to bc for laplacian)
             trP = P[0, 0]
             for k in range(1, N):
@@ -445,7 +453,7 @@ def solve_poisson(W):
     vtmp = np.zeros(lap.shape[1], dtype=type(W[0, 0].real))
     ytmp = np.zeros(lap.shape[1], dtype=W.dtype)
     P = np.zeros_like(W)
-    solve_direct_(lap, W, P, vtmp, ytmp)
+    solve_direct_(lap, W, P, vtmp, ytmp, True)  # Remove trace: Laplacian is singular
 
     return P
 
@@ -486,7 +494,7 @@ def solve_heat(h_times_nu, W0):
     vtmp = np.zeros(heat.shape[1], dtype=np.float64)
     ytmp = np.zeros(heat.shape[1], dtype=np.complex128)
     Wh = np.zeros_like(W0)
-    solve_direct_(heat, W0, Wh, vtmp, ytmp)
+    solve_direct_(heat, W0, Wh, vtmp, ytmp, False)
 
     return Wh
 
@@ -524,7 +532,7 @@ def solve_helmholtz(W, alpha=1.0):
     vtmp = np.zeros(helmholtz.shape[1], dtype=np.float64)
     ytmp = np.zeros(helmholtz.shape[1], dtype=np.complex128)
     P = np.zeros_like(W)
-    solve_direct_(helmholtz, W, P, vtmp, ytmp)
+    solve_direct_(helmholtz, W, P, vtmp, ytmp, False)
 
     return P
 
@@ -558,7 +566,8 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
 
     N = W0.shape[0]
 
-    if (N, h, nu, alpha) not in _direct_viscdamp_cache:
+    key = (N, h, nu, alpha, theta)
+    if key not in _direct_viscdamp_cache:
         # Get direct laplacian
         lap = laplacian(N, bc=False)
 
@@ -566,9 +575,9 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
         viscdamp = (1.0+h*alpha*theta)*np.array([[0.], [1.]]) - (h*nu*theta)*lap
 
         # Store in cache
-        _direct_viscdamp_cache[(N, h, nu, alpha)] = viscdamp
+        _direct_viscdamp_cache[key] = viscdamp
     else:
-        viscdamp = _direct_viscdamp_cache[(N, h, nu, alpha)]
+        viscdamp = _direct_viscdamp_cache[key]
 
     vtmp = np.zeros(viscdamp.shape[1], dtype=np.float64)
     ytmp = np.zeros(viscdamp.shape[1], dtype=np.complex128)
@@ -584,6 +593,6 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
 
     # Solve linear subsystems
     Wh = np.zeros_like(W0)
-    solve_direct_(viscdamp, Wrhs, Wh, vtmp, ytmp)
+    solve_direct_(viscdamp, Wrhs, Wh, vtmp, ytmp, False)
 
     return Wh

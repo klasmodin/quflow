@@ -163,7 +163,7 @@ def dot_tridiagonal(lap, P):
 
 
 @njit(parallel=True)
-def solve_tridiagonal_numba(lap, W):
+def solve_tridiagonal_numba(lap, W, remove_trace):
     """
     Function for solving the quantized
     Poisson equation (or more generally the equation defined by
@@ -176,6 +176,10 @@ def solve_tridiagonal_numba(lap, W):
         Tridiagonal laplacian.
     W: ndarray(shape=(N, N), dtype=complex)
         Input matrix.
+    remove_trace: bool
+        Whether to remove the trace of the right-hand side and of the
+        solution (for the singular Poisson equation). Use False for
+        non-singular operators.
 
     Returns
     -------
@@ -184,7 +188,7 @@ def solve_tridiagonal_numba(lap, W):
     """
     N = W.shape[0]
 
-    Wdiagh = mat2diagh(W)
+    Wdiagh = mat2diagh(W, remove_trace)
     Pdiagh = np.zeros_like(Wdiagh)
 
     # For each double-tridiagonal, solve a tridiagonal system
@@ -206,8 +210,9 @@ def solve_tridiagonal_numba(lap, W):
             x[i] = (d[i] - a[i]*x[i+1])/b[i]
 
     # Make sure the trace of P vanishes (corresponds to bc for laplacian)
-    trP = Pdiagh[0, :].sum()/N
-    Pdiagh[0, :] -= trP
+    if remove_trace:
+        trP = Pdiagh[0, :].sum()/N
+        Pdiagh[0, :] -= trP
 
     # Convert back to matrix
     P = diagh2mat(Pdiagh)
@@ -215,7 +220,7 @@ def solve_tridiagonal_numba(lap, W):
     return P
 
 
-def solve_tridiagonal_lapack(lap, W):
+def solve_tridiagonal_lapack(lap, W, remove_trace):
     """
     Function for solving the quantized
     Poisson equation (or more generally the equation defined by
@@ -228,6 +233,10 @@ def solve_tridiagonal_lapack(lap, W):
         Tridiagonal laplacian.
     W: ndarray(shape=(N, N), dtype=complex)
         Input matrix.
+    remove_trace: bool
+        Whether to remove the trace of the right-hand side and of the
+        solution (for the singular Poisson equation). Use False for
+        non-singular operators.
 
     Returns
     -------
@@ -236,7 +245,7 @@ def solve_tridiagonal_lapack(lap, W):
     """
     N = W.shape[0]
 
-    Wdiagh = mat2diagh(W)
+    Wdiagh = mat2diagh(W, remove_trace)
     Pdiagh = np.zeros_like(Wdiagh)
 
     # For each double-tridiagonal, solve a tridiagonal system
@@ -245,8 +254,9 @@ def solve_tridiagonal_lapack(lap, W):
         Pdiagh[m, :] = solveh_banded(-lap[m, :, :],  -Wdiagh[m, :], lower=True)
 
     # Make sure we stay in su(N) (corresponds to vanishing mean bc)
-    trP = Pdiagh[0, :].sum()/N
-    Pdiagh[0, :] -= trP
+    if remove_trace:
+        trP = Pdiagh[0, :].sum()/N
+        Pdiagh[0, :] -= trP
 
     # Convert back to matrix
     P = diagh2mat(Pdiagh)
@@ -320,7 +330,7 @@ def solve_poisson(W):
     """
     N = W.shape[0]
     lap = laplacian(N, bc=True)
-    P = solve_tridiagonal(lap, W)
+    P = solve_tridiagonal(lap, W, True)  # Remove trace: Laplacian is singular
 
     return P
 
@@ -356,7 +366,7 @@ def solve_heat(h_times_nu, W0):
     else:
         heat = _tridiagonal_heat_cache[(N, h_times_nu)]
 
-    Wh = solve_tridiagonal(-heat, -W0)  # Temporary sign fix since matrix should be pos def.
+    Wh = solve_tridiagonal(-heat, -W0, False)  # Temporary sign fix since matrix should be pos def.
 
     return Wh
 
@@ -392,7 +402,8 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
 
     N = W0.shape[0]
 
-    if (N, h, nu, alpha) not in _tridiagonal_viscdamp_cache:
+    key = (N, h, nu, alpha, theta)
+    if key not in _tridiagonal_viscdamp_cache:
         # Get tridiagonal laplacian
         lap = laplacian(N, bc=False)
 
@@ -401,9 +412,9 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
         viscdamp[:, 0, :] += 1.0+h*alpha*theta
 
         # Store in cache
-        _tridiagonal_viscdamp_cache[(N, h, nu, alpha)] = viscdamp
+        _tridiagonal_viscdamp_cache[key] = viscdamp
     else:
-        viscdamp = _tridiagonal_viscdamp_cache[(N, h, nu, alpha)]
+        viscdamp = _tridiagonal_viscdamp_cache[key]
 
     # Prepare right hand side in Crank-Nicolson
     if theta == 1:
@@ -415,6 +426,6 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
         Wrhs += h*force
 
     # Solve linear subsystems
-    Wh = solve_tridiagonal(viscdamp, Wrhs)
+    Wh = solve_tridiagonal(viscdamp, Wrhs, False)
 
     return Wh
