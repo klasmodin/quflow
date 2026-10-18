@@ -118,3 +118,27 @@ def test_commutator_follows_select_skewherm(random_skewh, rng, nonskewh_mode):
 def test_commutator_default_skewherm(random_skewh):
     A, B = random_skewh(N), random_skewh(N)
     np.testing.assert_allclose(qf.integrators.commutator(A, B), A@B - B@A, rtol=0, atol=1e-12)
+
+
+def _convergence_order(integrator, steps_coarse, **kwargs):
+    """Observed order of `integrator` from errors at steps_coarse and 2*steps_coarse steps."""
+    N = 8
+    rng = np.random.default_rng(1)
+    omega = np.zeros(N**2)
+    omega[1:16] = rng.standard_normal(15)  # band limited initial vorticity (el <= 3)
+    W0 = qf.shr2mat(omega, N=N)
+    T = 10*qf.hbar(N)  # dimensionless final time 10
+    reference = qf.isomp(W0.copy(), T/8192, 8192, tol=1e-14, maxit=50)
+    errors = [np.abs(integrator(W0.copy(), T/n, n, **kwargs) - reference).max()
+              for n in (steps_coarse, 2*steps_coarse)]
+    return np.log2(errors[0]/errors[1])
+
+
+@pytest.mark.parametrize("integrator, steps_coarse, order, kwargs", [
+    (isospectral.isomp_simple, 640, 1, {}),
+    (isospectral.isomp_fixedpoint, 80, 2, dict(tol=1e-14, maxit=50)),
+    (isospectral.isomp_quasinewton, 80, 2, dict(tol=1e-14, maxit=50)),
+])
+def test_convergence_order(integrator, steps_coarse, order, kwargs):
+    # Step sizes are chosen in the asymptotic regime (observed orders 0.99 and 1.99)
+    assert abs(_convergence_order(integrator, steps_coarse, **kwargs) - order) < 0.1

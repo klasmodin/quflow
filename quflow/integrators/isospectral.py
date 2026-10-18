@@ -37,20 +37,28 @@ isomp_fixedpoint (alias ``isomp``, the default)
     time-dependent Hamiltonians, forcing, Strang splitting, compensated
     summation and stacks of matrices.
 isomp_quasinewton
-    Solves the midpoint equations by iterating the Cayley form above, with an
-    LU factorization per iteration.
+    Solves the midpoint equations by a quasi-Newton iteration on the Cayley
+    form above, with an LU factorization per iteration.
 isomp_simple
-    Explicit variant: one Hamiltonian evaluation per step, using the previous
-    step's :math:`\tilde W`.
+    Explicit first order variant: one Hamiltonian evaluation per step, using
+    the previous step's :math:`\tilde W`.
 
 All integrators take the time step ``dt`` in physical time units and work
 internally with :math:`h = \Delta t/\hbar`. They overwrite their input ``W``
 and return it.
 
+The isospectral midpoint method is introduced in [1]_ and applied to the
+quantized Euler equations in [2]_. The compensated summation used to reduce
+the accumulation of rounding errors (Brouwer's law) follows [3]_.
+
 References
 ----------
-K. Modin and M. Viviani. *A Casimir preserving scheme for long-time simulation
-of spherical ideal hydrodynamics*, J. Fluid Mech., 884:A22, 2020.
+.. [1] K. Modin and M. Viviani. *Lie-Poisson methods for isospectral flows*,
+   Found. Comput. Math., 20, 2020.
+.. [2] K. Modin and M. Viviani. *A Casimir preserving scheme for long-time
+   simulation of spherical ideal hydrodynamics*, J. Fluid Mech., 884:A22, 2020.
+.. [3] E. Hairer, R. I. McLachlan and A. Razakarivony. *Achieving Brouwer's law
+   with implicit Runge-Kutta methods*, BIT Numer. Math., 48, 2008.
 """
 import numpy as np
 import scipy.linalg
@@ -327,6 +335,11 @@ def isomp_quasinewton(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None,
     :math:`A^{H} = I + \tfrac{h}{2}\tilde P`, so this is the isospectral midpoint
     method described in the module docstring.
 
+    Compared with plain fixed-point iteration on :math:`\tilde W`, solving
+    the Cayley form exactly for a given :math:`\tilde P` takes part of the
+    Jacobian of the midpoint equations into account, which makes the
+    iteration a quasi-Newton method.
+
     Parameters
     ----------
     W : ndarray, shape (N, N), complex
@@ -446,6 +459,7 @@ def isomp_simple(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None, **kw
     r"""
     Time-stepping by the simplified isospectral midpoint method.
     This is an explicit isospectral method but not symplectic. Nor is it reversible.
+    It is of first order.
 
     Instead of solving the midpoint equations, each step evaluates the
     Hamiltonian once, at the :math:`\tilde W` of the previous step (at the first
