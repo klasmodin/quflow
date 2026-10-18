@@ -1,3 +1,48 @@
+r"""
+Quantization: conversion between spherical harmonics and matrices.
+
+A function on the sphere with spherical-harmonic coefficients
+:math:`\omega_{\ell m}` (:math:`0 \le \ell < N`, :math:`-\ell \le m \le \ell`)
+is quantized to the :math:`N\times N` matrix
+
+.. math::
+
+    W = \sum_{\ell, m} \omega_{\ell m}\, T_{\ell m},
+
+where :math:`T_{\ell m}` are the quantized spherical harmonics of Hoppe and
+Yau. The coefficients are stored in a vector of length :math:`N^2` with index
+``ind = el*(el+1) + m`` (see :func:`quflow.utils.elm2ind`).
+
+Two bases are used:
+
+* **Real** (``shr``): :func:`shr2mat` and :func:`mat2shr` convert between
+  real coefficient vectors and skew-Hermitian matrices (the Lie algebra
+  :math:`\mathfrak{u}(N)`). The basis matrices (:func:`elmr2mat`) are
+  orthonormal with respect to :func:`quflow.geometry.inner_L2`, so
+  :func:`shr2mat` is an isometry: ``norm_L2(shr2mat(omega))`` equals the
+  Euclidean norm of ``omega``. :math:`T_{00} = iI`, so the
+  :math:`\ell = 0` coefficient corresponds to the trace.
+* **Complex** (``shc``): :func:`shc2mat` and :func:`mat2shc` convert between
+  complex coefficient vectors and arbitrary complex matrices
+  (:math:`\mathfrak{gl}(N, \mathbb{C})`); see :func:`elmc2mat`. Real and
+  complex coefficients are related by :func:`quflow.transforms.shr2shc` and
+  :func:`quflow.transforms.shc2shr`.
+
+The basis matrices are eigenvectors of the quantized Laplacian,
+:math:`\Delta_N T_{\ell m} = -\ell(\ell+1) T_{\ell m}` (see
+:mod:`quflow.laplacian`).
+
+Each :math:`T_{\ell m}` is supported on the diagonals :math:`\pm m` of the
+matrix. The values along the :math:`m`-th diagonal are the eigenvectors of
+the (tridiagonal) restriction of the Laplacian to that diagonal. These are
+computed once per :math:`N` by :func:`compute_basis` and stored in a flat
+*basis array* (see :func:`get_basis` for caching): for each
+:math:`m = 0, \dots, N-1`, a block of shape ``(N-m, N-m)`` whose rows are
+the positions along the diagonal and whose columns are
+:math:`\ell = m, \dots, N-1`, stored row-major from offset
+``basis_break_index(m, N)``. The total length is
+:math:`\sum_{k=1}^N k^2 = N(N+1)(2N+1)/6`.
+"""
 import numpy as np
 from .utils import elm2ind, complex_dtype, real_dtype, berezin_multipliers
 from .laplacian.direct import compute_direct_laplacian
@@ -26,10 +71,16 @@ def basis_break_index(absm, N):
     """
     Computes the m break indices for the basis.
 
+    The block for diagonal `absm` starts at this offset in the basis array,
+    i.e., the result is ``sum((N - j)**2 for j in range(absm))``.
+
     Parameters
     ----------
-    n: int or np.array of int
+    absm: int or np.array of int
+        Diagonal ``|m|``, ``0 <= absm <= N``. Note: an array argument is
+        modified in place (decremented by one).
     N: int
+        Size of the matrices.
 
     Returns
     -------
@@ -46,6 +97,20 @@ def adjust_basis_orientation_(w2, m, tol=1e-16):
     """
     Adjust (inline) the sign of the eigenbasis `w2` so that it corresponds
     to standard spherical harmonics.
+
+    Eigenvectors are only defined up to sign. Each column is multiplied by
+    ±1, based on the signs of its last nonzero entries and the parity of `m`,
+    to match the sign convention of Hoppe's quantization basis.
+
+    Parameters
+    ----------
+    w2 : ndarray, shape (N-m, N-m), float
+        Eigenvectors (columns) of the Laplacian block for diagonal `m`
+        (modified in place).
+    m : int
+        Diagonal.
+    tol : float, optional
+        Entries smaller than this in absolute value are treated as zero.
     """
     for i in range(w2.shape[1]):
         val = w2[-1, i]
@@ -69,13 +134,26 @@ def compute_basis(N, dtype=np.float64):
     """
     Compute quantization basis.
 
+    For each diagonal ``m = 0, ..., N-1``, computes the eigenvectors of the
+    tridiagonal block of the quantized Laplacian (from
+    :func:`quflow.laplacian.direct.compute_direct_laplacian`) with
+    :func:`scipy.linalg.eigh_tridiagonal`, scales them so that each block
+    ``B`` satisfies ``B.T @ B = N*I``, orders them by increasing ``el``, and
+    fixes their signs with :func:`adjust_basis_orientation_`.
+
+    Usually called through :func:`get_basis`, which caches the result.
+
     Parameters
     ----------
     N: int
+        Size of the matrices.
+    dtype: float type, optional
+        Default is ``np.float64``.
 
     Returns
     -------
-    basis: ndarray
+    basis: ndarray, shape (N*(N+1)*(2*N+1)//6,), float
+        The basis array (see the module docstring for its layout).
     """
 
     # basis_break_indices = np.hstack((0, (np.arange(N, 0, -1)**2).cumsum()))
@@ -115,6 +193,9 @@ def compute_basis(N, dtype=np.float64):
 
 @njit
 def assign_lower_diag_(diag_m, m, W_out):
+    """
+    Set the lower diagonal ``-m`` of `W_out` to `diag_m` (``W_out[i+m, i] = diag_m[i]``).
+    """
     N = W_out.shape[0]
     for i in range(N-m):
         W_out[i+m, i] = diag_m[i]
@@ -122,6 +203,9 @@ def assign_lower_diag_(diag_m, m, W_out):
 
 @njit
 def assign_upper_diag_(diag_m, m, W_out):
+    """
+    Set the upper diagonal ``m`` of `W_out` to `diag_m` (``W_out[i, i+m] = diag_m[i]``).
+    """
     N = W_out.shape[0]
     for i in range(N-m):
         W_out[i, i+m] = diag_m[i]
@@ -135,8 +219,12 @@ def shr2mat_serial_(omega, basis, W_out):
     Parameters
     ----------
     omega: ndarray, dtype=float, shape=(N**2,)
-    basis: ndarray, dtype=float, shape=(np.sum(np.arange(N)**2),)
+        Real coefficients. A shorter vector of length ``(elmax+1)**2`` is
+        treated as band limited (higher coefficients zero).
+    basis: ndarray, dtype=float, shape=(N*(N+1)*(2*N+1)//6,)
+        Basis array from :func:`get_basis`.
     W_out: ndarray, dtype=complex, shape=(N,N)
+        Output matrix. All entries on the used diagonals are overwritten.
     """
     N = W_out.shape[-1]
     Nmax = N
@@ -184,8 +272,12 @@ def shr2mat_parallel_(omega, basis, W_out):
     Parameters
     ----------
     omega: ndarray, dtype=float, shape=(N**2,)
-    basis: ndarray, dtype=float, shape=(np.sum(np.arange(N)**2),)
+        Real coefficients. A shorter vector of length ``(elmax+1)**2`` is
+        treated as band limited (higher coefficients zero).
+    basis: ndarray, dtype=float, shape=(N*(N+1)*(2*N+1)//6,)
+        Basis array from :func:`get_basis`.
     W_out: ndarray, dtype=complex, shape=(N,N)
+        Output matrix. All entries on the used diagonals are overwritten.
     """
     N = W_out.shape[-1]
 
@@ -243,6 +335,21 @@ shr2mat_ = shr2mat_parallel_
 
 @njit
 def mat2shr_serial_(W, basis, omega_out):
+    """
+    Low-level implementation of `mat2shr`.
+
+    Reads only the diagonal and the lower triangle of `W` (assumed
+    skew-Hermitian).
+
+    Parameters
+    ----------
+    W: ndarray, dtype=complex, shape=(N,N)
+    basis: ndarray, dtype=float, shape=(N*(N+1)*(2*N+1)//6,)
+        Basis array from :func:`get_basis`.
+    omega_out: ndarray, dtype=float, shape=(N**2,)
+        Output coefficients (overwritten). If shorter, of length
+        ``(elmax+1)**2``, only the coefficients up to ``elmax`` are computed.
+    """
     N = W.shape[-1]
     # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
     # basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
@@ -282,6 +389,21 @@ def mat2shr_serial_(W, basis, omega_out):
 
 @njit(parallel=True, error_model='numpy', fastmath=True)
 def mat2shr_parallel_(W, basis, omega_out):
+    """
+    Low-level parallel implementation of `mat2shr`.
+
+    Reads only the diagonal and the lower triangle of `W` (assumed
+    skew-Hermitian).
+
+    Parameters
+    ----------
+    W: ndarray, dtype=complex, shape=(N,N)
+    basis: ndarray, dtype=float, shape=(N*(N+1)*(2*N+1)//6,)
+        Basis array from :func:`get_basis`.
+    omega_out: ndarray, dtype=float, shape=(N**2,)
+        Output coefficients (overwritten). If shorter, of length
+        ``(elmax+1)**2``, only the coefficients up to ``elmax`` are computed.
+    """
     N = W.shape[-1]
 
     # Find out maximum el
@@ -336,9 +458,12 @@ def shc2mat_(omega, basis, W_out):
 
     Parameters
     ----------
-    omega: ndarray, shape (N*(N+1)/2,)
-    basis: ndarray, shape (np.sum(np.arange(N)**2),)
-    W_out: ndarray, shape (N,N)
+    omega: ndarray, complex, shape (N**2,)
+        Complex coefficients.
+    basis: ndarray, float, shape (N*(N+1)*(2*N+1)//6,)
+        Basis array from :func:`get_basis`.
+    W_out: ndarray, complex, shape (N,N)
+        Output matrix (overwritten).
     """
     N = W_out.shape[-1]
     # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
@@ -367,6 +492,18 @@ def shc2mat_(omega, basis, W_out):
 
 @njit #(parallel=True, error_model='numpy')
 def mat2shc_(W, basis, omega_out):
+    """
+    Low-level implementation of `mat2shc`.
+
+    Parameters
+    ----------
+    W: ndarray, complex, shape (N,N)
+        Input matrix (arbitrary).
+    basis: ndarray, float, shape (N*(N+1)*(2*N+1)//6,)
+        Basis array from :func:`get_basis`.
+    omega_out: ndarray, complex, shape (N**2,)
+        Output coefficients (overwritten).
+    """
     N = W.shape[0]
     # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
     # basis_break_indices[1:] = (np.arange(N, 0, -1, dtype=np.int32)**2).cumsum()
@@ -400,20 +537,32 @@ def get_basis(N, allow_compute=True, dtype=np.double):
     """
     Return a quantization basis for band limit N.
     The basis is obtained as follows:
+
     - First look in memory cache.
-    - Second look in storage cache.
-    - Third compute basis from scratch.
+    - Second look in storage cache (basis files found by
+      :func:`quflow.io.load_basis`; the directories can be set with the
+      environment variable ``QUFLOW_BASIS_PATH``).
+    - Third compute basis from scratch with :func:`compute_basis`. The
+      result is saved to disk if the environment variable
+      ``QUFLOW_SAVE_COMPUTED_BASIS`` is set to a true value (default: not saved).
 
     Parameters
     ----------
     N: int
+        Size of the matrices.
     allow_compute: bool, optional
         Whether to allow computation of basis if not found elsewhere.
         Default is `True`.
+    dtype: float type, optional
+        Data type of a computed basis, and part of the memory cache key.
+        Default is ``np.double``.
 
     Returns
     -------
-    basis: ndarray
+    basis: ndarray, shape (N*(N+1)*(2*N+1)//6,), float, or None
+        The basis array (see the module docstring for its layout); the cached
+        array is returned, so do not modify it. None if no basis was found and
+        `allow_compute` is false.
     """
     global _basis_cache
 
@@ -445,18 +594,48 @@ def get_basis(N, allow_compute=True, dtype=np.double):
 
 
 def shr2mat(omega, N=-1, berezin=False):
-    """
+    r"""
     Convert real spherical harmonics to matrix.
+
+    Computes :math:`W = \sum_{\ell m} \omega_{\ell m} T_{\ell m}` in the real
+    basis (see the module docstring and :func:`elmr2mat`). The map is linear
+    and an isometry onto the skew-Hermitian matrices; :func:`mat2shr` is
+    its inverse.
 
     Parameters
     ----------
     omega: ndarray(shape=(N**2,), dtype=float)
+        Real spherical-harmonic coefficients, indexed by
+        ``el*(el+1) + m``. If `N` is given, a shorter vector is treated as
+        band limited (missing coefficients zero), and a longer one is
+        truncated to its first ``N**2`` entries.
     N : int (optional)
         Size of matrix (automatic if not specified).
+    berezin : bool, optional
+        If True, divide the coefficients by
+        :func:`quflow.utils.berezin_multipliers` first, i.e., interpret
+        `omega` as coefficients of the Berezin-Toeplitz quantization.
+        Not recommended (it does not preserve energy or enstrophy); a
+        warning is issued. Default is False.
 
     Returns
     -------
     W : ndarray(shape=(N, N), dtype=complex)
+        Skew-Hermitian matrix (a new array). Single precision input gives a
+        single precision result.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import quflow as qf
+    >>> omega = np.random.default_rng(0).standard_normal(16)
+    >>> W = qf.shr2mat(omega)
+    >>> W.shape
+    (4, 4)
+    >>> bool(np.allclose(qf.mat2shr(W), omega))
+    True
+    >>> bool(np.isclose(qf.geometry.norm_L2(W), np.linalg.norm(omega)))
+    True
     """
     
     assert np.isrealobj(omega), "omega must be a real array."
@@ -489,15 +668,34 @@ def mat2shr(W, elmax=-1, berezin=False):
     """
     Convert NxN complex matrix to real spherical harmonics.
 
+    Inverse of :func:`shr2mat` on skew-Hermitian matrices.
+
     Parameters
     ----------
     W: ndarray(shape=(N, N), dtype=complex)
+        Skew-Hermitian matrix. Only the diagonal and the lower triangle are
+        read.
     elmax: int (optional)
-        Maximum value of el
+        Maximum value of el. Note: the length of the result is currently
+        not ``(elmax+1)**2`` as intended; see Notes.
+    berezin : bool, optional
+        If True, multiply the coefficients by
+        :func:`quflow.utils.berezin_multipliers`, i.e., return coefficients
+        of the Berezin-Toeplitz quantization. Not recommended; a warning is
+        issued (use the Berezin scaling in :func:`quflow.transforms.shr2fun`
+        instead). Default is False.
 
     Returns
     -------
     omega: ndarray(shape=(N**2,), dtype=float)
+        Real spherical-harmonic coefficients (a new array).
+
+    Notes
+    -----
+    With ``elmax > 0`` the result has length ``(elmax+1)**4`` instead of
+    ``(elmax+1)**2``: it contains the coefficients up to
+    ``el = (elmax+1)**2 - 1``, or, if ``(elmax+1)**4 >= N**2``, all ``N**2``
+    coefficients followed by zeros. ``elmax = 0`` is ignored.
     """
 
     assert np.iscomplexobj(W), "W must be a complex array."
@@ -520,17 +718,30 @@ def mat2shr(W, elmax=-1, berezin=False):
 
 
 def shc2mat(omega, N=-1, berezin=False):
-    """
+    r"""
     Convert complex spherical harmonics to matrix.
+
+    Computes :math:`W = \sum_{\ell m} \omega_{\ell m} T_{\ell m}` in the
+    complex basis (see :func:`elmc2mat`). The map is linear and invertible
+    on all complex matrices; :func:`mat2shc` is its inverse. For
+    ``omega = shr2shc(omega_real)`` the result equals ``shr2mat(omega_real)``.
 
     Parameters
     ----------
     omega: complex ndarray, shape (N**2,)
+        Complex spherical-harmonic coefficients, indexed by ``el*(el+1) + m``.
+        If `N` is given, a shorter vector is padded with zeros and a longer
+        one truncated.
     N : (optional) size of matrix (automatic if not specified)
+    berezin : bool, optional
+        If True, divide the coefficients by
+        :func:`quflow.utils.berezin_multipliers` first. Not recommended; a
+        warning is issued. Default is False.
 
     Returns
     -------
     W : complex ndarray, shape (N, N)
+        A new array.
     """
 
     # Process input depending on N
@@ -562,13 +773,22 @@ def mat2shc(W, berezin=False):
     """
     Convert NxN complex matrix to complex spherical harmonics.
 
+    Inverse of :func:`shc2mat`, for arbitrary complex matrices.
+
     Parameters
     ----------
     W: complex ndarray, shape (N, N)
+        Matrix to convert (need not be skew-Hermitian).
+    berezin : bool, optional
+        If True, multiply the coefficients by
+        :func:`quflow.utils.berezin_multipliers`. Not recommended; a warning
+        is issued (use the Berezin scaling in :func:`quflow.transforms.shc2fun`
+        instead). Default is False.
 
     Returns
     -------
     omega: complex ndarray, shape (N**2,)
+        Complex spherical-harmonic coefficients (a new array).
     """
     N = W.shape[0]
     omega = np.zeros(N**2, dtype=W.dtype)
@@ -589,15 +809,30 @@ def elmr2mat(el, m, N, dtype=np.cdouble):
     This gives a basis of u(N).
     The matrix is normalized with respect to `geometry.normL2`.
 
+    The matrices for all ``0 <= el < N``, ``-el <= m <= el`` form an
+    orthonormal basis of the skew-Hermitian matrices, with respect to
+    :func:`quflow.geometry.inner_L2`. ``elmr2mat(el, m, N)`` equals
+    ``shr2mat(e)`` for the unit coefficient vector ``e`` with a one at
+    index ``el*(el+1) + m``.
+
     Parameters
     ----------
     el: int
+        Degree, ``0 <= el < N``.
     m: int
+        Order, ``-el <= m <= el``.
     N: int
+        Size of the matrix.
+    dtype: complex type, optional
+        Default is ``np.cdouble``.
 
     Returns
     -------
     T_elm: diamatrix, shape (N, N)
+        Sparse matrix with nonzero diagonals ``-|m|`` and ``|m|``. It has an
+        extra attribute ``el``, used by :func:`quflow.laplacian.laplace` and
+        :func:`quflow.laplacian.solve_poisson` to apply the Laplacian by
+        scaling with ``-el*(el+1)``.
     """
     basis = get_basis(N=N, dtype=real_dtype(dtype))
     # basis_break_indices = np.zeros((N+1,), dtype=np.int32)
@@ -640,15 +875,25 @@ def elmc2mat(el, m, N, dtype=np.cdouble):
     This gives a basis of gl(N, C).
     The matrix is normalized with respect to `geometry.normL2`.
 
+    ``elmc2mat(el, m, N)`` equals ``shc2mat(e)`` for the unit coefficient
+    vector ``e`` with a one at index ``el*(el+1) + m``.
+
     Parameters
     ----------
     el: int
+        Degree, ``0 <= el < N``.
     m: int
+        Order, ``-el <= m <= el``.
     N: int
+        Size of the matrix.
+    dtype: complex type, optional
+        Default is ``np.cdouble``.
 
     Returns
     -------
     T_elm: diamatrix, shape (N, N)
+        Sparse matrix with the single nonzero diagonal ``-m``. It has an
+        extra attribute ``el`` (see :func:`elmr2mat`).
     """
     basis = get_basis(N=N, dtype=real_dtype(dtype))
     # basis_break_indices = np.zeros((N+1,), dtype=np.int32)

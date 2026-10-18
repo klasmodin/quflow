@@ -144,3 +144,64 @@ def test_elmc2mat_norm(el, m, N):
     T = qf.elmc2mat(el, m, N)
     
     np.testing.assert_allclose(qf.geometry.norm_L2(T.toarray()), 1.0)
+
+
+# --- Documented properties of the quantization ------------------------------
+
+@pytest.mark.parametrize("N", [3, 10])
+def test_shr2mat_isometry(N, random_shr):
+    # shr2mat is an isometry onto u(N) with respect to inner_L2
+    a, b = random_shr(N, zero_mean=False), random_shr(N, zero_mean=False)
+    A, B = qf.shr2mat(a), qf.shr2mat(b)
+    np.testing.assert_allclose(A, -A.conj().T, rtol=0, atol=1e-14)
+    np.testing.assert_allclose(qf.geometry.inner_L2(A, B), a@b, rtol=1e-13)
+    np.testing.assert_allclose(qf.mat2shr(A), a, rtol=0, atol=1e-13)
+
+
+@pytest.mark.parametrize("N", [3, 8])
+def test_elmr2mat_elmc2mat_are_unit_vectors(N):
+    for el in range(N):
+        for m in range(-el, el+1):
+            e = np.zeros(N**2)
+            e[qf.elm2ind(el, m)] = 1.0
+            Tr = qf.elmr2mat(el, m, N).toarray()
+            Tc = qf.elmc2mat(el, m, N).toarray()
+            np.testing.assert_allclose(Tr, qf.shr2mat(e), rtol=0, atol=1e-14)
+            np.testing.assert_allclose(Tc, qf.shc2mat(e.astype(complex)), rtol=0, atol=1e-14)
+            assert abs(qf.geometry.norm_L2(Tr) - 1) < 1e-13
+            assert abs(qf.geometry.norm_L2(Tc) - 1) < 1e-13
+
+
+def test_T00_is_i_times_identity():
+    N = 6
+    np.testing.assert_allclose(qf.elmr2mat(0, 0, N).toarray(), 1j*np.eye(N), rtol=0, atol=1e-14)
+
+
+@pytest.mark.parametrize("N", [3, 10])
+def test_shc2mat_round_trip_and_relation_to_real(N, rng, random_shr):
+    omega_c = rng.standard_normal(N**2) + 1j*rng.standard_normal(N**2)
+    np.testing.assert_allclose(qf.mat2shc(qf.shc2mat(omega_c)), omega_c, rtol=0, atol=1e-13)
+    omega_r = random_shr(N, zero_mean=False)
+    np.testing.assert_allclose(qf.shc2mat(qf.shr2shc(omega_r)), qf.shr2mat(omega_r), rtol=0, atol=1e-13)
+
+
+def test_mat2shr_reads_lower_triangle_only(random_shr):
+    N = 7
+    W = qf.shr2mat(random_shr(N))
+    np.testing.assert_array_equal(qf.mat2shr(np.tril(W)), qf.mat2shr(W))
+
+
+def test_shr2mat_band_limited_input(random_shr):
+    N = 9
+    omega = random_shr(4)  # el < 4
+    np.testing.assert_array_equal(qf.shr2mat(omega, N=N), qf.shr2mat(np.r_[omega, np.zeros(N**2 - 16)]))
+
+
+def test_basis_layout():
+    N = 7
+    basis = qf.get_basis(N)
+    assert basis.shape == (N*(N+1)*(2*N+1)//6,)
+    for m in range(N):
+        start = qf.basis_break_index(m, N)
+        B = basis[start:start + (N-m)**2].reshape(N-m, N-m)
+        np.testing.assert_allclose(B.T @ B, N*np.eye(N-m), rtol=0, atol=1e-12)
