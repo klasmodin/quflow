@@ -11,10 +11,12 @@ skew-Hermitian matrices. In this correspondence:
 * the :math:`L^2` inner product corresponds to
   :math:`\langle P, W\rangle = \operatorname{Re}\operatorname{tr}(P W^*)/N`
   (:func:`inner_L2`), for which the real quantization basis is orthonormal;
-* the coordinate functions :math:`x_1, x_2, x_3` correspond to the matrices
-  :math:`X_a = \hbar S_a` (:func:`cartesian_generators`), where :math:`S_a`
-  span the irreducible spin-:math:`(N-1)/2` representation of
-  :math:`\mathfrak{so}(3)` (:func:`so3_generators`). They satisfy
+* the matrices :math:`X_a = \hbar S_a` (:func:`cartesian_generators`),
+  where :math:`S_a` span the irreducible spin-:math:`(N-1)/2` representation
+  of :math:`\mathfrak{so}(3)` (:func:`so3_generators`), correspond to the
+  coordinate functions :math:`x_1, -x_2, x_3` (the sign of :math:`x_2`
+  comes from the sign convention for real spherical harmonics with
+  :math:`m < 0`, see :mod:`quflow.transforms`). They satisfy
   :math:`X_1^2 + X_2^2 + X_3^2 = -I`.
 
 Several functions also accept sparse ``scipy.sparse.dia_matrix`` input, as
@@ -286,10 +288,12 @@ def rotate(xi, W):
 
     Computes :math:`R W R^*` with
     :math:`R = \exp(\xi_1 S_1 + \xi_2 S_2 + \xi_3 S_3)` (see
-    :func:`so3_generators`). This rotates the corresponding function by the
-    angle :math:`|\xi|` about the axis :math:`\xi/|\xi|`; for example,
-    ``rotate((0, 0, theta), X1) = cos(theta)*X1 + sin(theta)*X2`` for the
-    matrices of :func:`cartesian_generators`.
+    :func:`so3_generators`), a rotation by the angle :math:`|\xi|` about the
+    axis :math:`\xi/|\xi|`. In terms of the matrices of
+    :func:`cartesian_generators`,
+    ``rotate((0, 0, theta), X1) = cos(theta)*X1 + sin(theta)*X2``. (Note
+    that :math:`X_2` corresponds to :math:`-x_2`, see
+    :func:`cartesian_generators`.)
 
     Parameters
     ----------
@@ -311,7 +315,7 @@ def rotate(xi, W):
 def cartesian_generators(N, dtype=np.complex128):
     r"""
     Return matrices X1, X2, X3 in u(N) corresponding to the Cartesian
-    coordinate functions x1, x2, x3 on the sphere.
+    coordinate functions on the sphere.
     The relation to the basis T_lm (see :func:`quflow.elmr2mat`) is that
     :math:`T_{1,-1} = \sqrt{3} X_2`, :math:`T_{1,0} = \sqrt{3} X_3` and
     :math:`T_{1,1} = \sqrt{3} X_1`.
@@ -319,6 +323,12 @@ def cartesian_generators(N, dtype=np.complex128):
     The matrices are :math:`X_a = \hbar S_a` (see :func:`so3_generators`)
     and satisfy :math:`X_1^2 + X_2^2 + X_3^2 = -I`, the quantized version of
     :math:`x_1^2 + x_2^2 + x_3^2 = 1`.
+
+    With the convention for real spherical harmonics in
+    :mod:`quflow.transforms`, whose basis functions for :math:`m < 0` have
+    the opposite sign of the common real form, ``shr2fun(mat2shr(X))``
+    gives :math:`x_1`, :math:`-x_2` and :math:`x_3` for
+    :math:`X_1, X_2, X_3`. That is, :math:`X_2` quantizes :math:`-x_2`.
 
     Parameters
     ----------
@@ -343,11 +353,11 @@ def sgrad(P):
 
     Computes :math:`dP_a = \frac{1}{\hbar}[X_a, P] = [S_a, P]` for
     :math:`a = 1, 2, 3` (see :func:`cartesian_generators`), the quantized
-    Poisson brackets :math:`\{x_a, p\}`. In the continuum limit these are the
-    Cartesian components of the symplectic gradient (Hamiltonian vector
-    field) of :math:`p`, :math:`\nabla p \times x`. For example,
-    ``sgrad(X3)`` returns ``(-X2, X1, 0)``, the rotation about the
-    :math:`x_3`-axis.
+    Poisson brackets of the coordinate matrices with :math:`P`. These are
+    the Cartesian components of the symplectic gradient (Hamiltonian vector
+    field) of the function corresponding to :math:`P`, in the frame of the
+    matrices :math:`X_a` (note that :math:`X_2` corresponds to :math:`-x_2`).
+    For example, ``sgrad(X3)`` returns ``(-X2, X1, 0)``.
 
     Parameters
     ----------

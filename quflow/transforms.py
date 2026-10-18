@@ -1,3 +1,42 @@
+r"""
+Spherical-harmonic transforms between function values and coefficients.
+
+Functions on the sphere are sampled on the grid of :func:`quflow.utils.sphgrid`
+(the McEwen-Wiaux sampling: ``N`` values of the inclination ``theta`` and
+``2N-1`` values of the azimuth ``phi``), giving arrays of shape
+``(N, 2N-1)`` (format ``fun``). For band limit ``N`` (degrees
+``0 <= el < N``), the coefficients are stored in vectors of length ``N**2``
+with index ``el*(el+1) + m`` (see :func:`quflow.utils.elm2ind`).
+
+Conventions:
+
+* **Complex coefficients** (``shc``) are taken with respect to
+  :math:`\sqrt{4\pi}\, Y_\ell^m`, where :math:`Y_\ell^m` are the
+  orthonormal spherical harmonics with the Condon-Shortley phase (as in
+  :func:`scipy.special.sph_harm_y`):
+  :math:`f = \sum_{\ell m} \omega_{\ell m} \sqrt{4\pi}\, Y_\ell^m`.
+  With this normalization, :math:`\omega_{00}` is the mean value of
+  :math:`f` over the sphere, and :math:`\overline{f^2} = \sum |\omega_{\ell m}|^2`.
+* **Real coefficients** (``shr``) are taken with respect to the real
+  functions :math:`\sqrt{4\pi}\, \sqrt2 (-1)^m \operatorname{Re} Y_\ell^m`
+  for :math:`m > 0`, :math:`\sqrt{4\pi}\, Y_\ell^0` for :math:`m = 0`, and
+  :math:`-\sqrt{4\pi}\, \sqrt2 (-1)^m \operatorname{Im} Y_\ell^{|m|}` for
+  :math:`m < 0`. For :math:`m < 0` this is the opposite sign of the common
+  real form of the spherical harmonics. For example, the real basis
+  functions for :math:`\ell = 1` are :math:`\sqrt3 x_1`,
+  :math:`\sqrt3 x_3` and :math:`-\sqrt3 x_2` for
+  :math:`m = 1, 0, -1`.
+
+:func:`shc2fun` and :func:`shr2fun` by default apply the Berezin
+multipliers (:func:`quflow.utils.berezin_multipliers`), which smooth the
+function to correspond to the Berezin-Toeplitz quantization. With the
+default, :func:`fun2shr` is therefore not the inverse of :func:`shr2fun`;
+pass ``berezin=False`` for the plain transform.
+
+The transforms use :mod:`pyssht` if it is installed, and otherwise
+:mod:`ducc0`, through functions ``forward`` and ``inverse`` with the
+interface of :mod:`pyssht`.
+"""
 import numpy as np
 from numba import njit, prange
 from .utils import complex_dtype, real_dtype, berezin_multipliers
@@ -115,6 +154,30 @@ except ModuleNotFoundError:
         return res
 
     def forward(f, L, Spin=0, Method='MW', Reality=False, nthreads: int=0):
+        """
+        Forward spherical-harmonic transform, with the interface of
+        ``pyssht.forward`` (implemented with :mod:`ducc0`).
+
+        Parameters
+        ----------
+        f : ndarray
+            Function values on the sampling grid of `Method`.
+        L : int
+            Band limit (degrees ``0 <= el < L``).
+        Spin : int, optional
+            Spin of the function. Default is 0.
+        Method : str, optional
+            Sampling scheme: ``'MW'`` (default), ``'MWSS'``, ``'DH'`` or ``'GL'``.
+        Reality : bool, optional
+            Whether `f` is real. Default is False.
+        nthreads : int, optional
+            Number of threads (0 means all). Default is 0.
+
+        Returns
+        -------
+        flm : ndarray, shape (L**2,), complex
+            Coefficients with respect to the orthonormal :math:`Y_\\ell^m`.
+        """
         gdict = {"DH":"F1", "MW":"MW", "MWSS":"CC", "GL":"GL"}
         theta = _get_theta(L, Method)
         ntheta = theta.shape[0]
@@ -149,6 +212,24 @@ except ModuleNotFoundError:
             return res
 
     def inverse(flm: np.ndarray, L: int, Spin: int=0, Method: str='MW', Reality: bool=False, nthreads: int=0):
+        """
+        Inverse spherical-harmonic transform, with the interface of
+        ``pyssht.inverse`` (implemented with :mod:`ducc0`).
+
+        Parameters
+        ----------
+        flm : ndarray, shape (L**2,), complex
+            Coefficients with respect to the orthonormal :math:`Y_\\ell^m`.
+        L : int
+            Band limit.
+        Spin, Method, Reality, nthreads
+            As for :func:`forward`. With ``Reality=True`` the result is real.
+
+        Returns
+        -------
+        f : ndarray
+            Function values on the sampling grid of `Method`.
+        """
         gdict = {"DH":"F1", "MW":"MW", "MWSS":"CC", "GL":"GL"}
         theta = _get_theta(L, Method)
         ntheta = theta.shape[0]
@@ -190,16 +271,20 @@ def fun2shc(f):
     """
     Transform a theta-phi function to complex spherical harmonics.
 
+    Inverse of ``shc2fun(omega, berezin=False)`` (see the module docstring
+    for the normalization).
+
     Parameters
     ----------
     f: array_like, shape (N, 2*N-1)
         Matrix representing function values in spherical coordinates
-        (theta, phi). Can be either real or complex.
+        (theta, phi), on the grid of :func:`quflow.utils.sphgrid`.
+        Can be either real or complex.
 
     Returns
     -------
-    omega: ndarray
-        Complex array of spherical coordinates.
+    omega: ndarray, shape (N**2,), complex
+        Complex spherical-harmonic coefficients.
     """
 
     # Check that the input is correct
@@ -224,20 +309,26 @@ def shc2fun(omega, isreal=False, N=-1, berezin=True):
     Parameters
     ----------
     omega: array_like
-        Complex array of spherical harmonics.
+        Complex array of spherical harmonics, of length ``N**2``.
 
-    isreal: bool (optional, default=True)
-        Set to true if the signal corresponds to a real function.
+    isreal: bool (optional, default=False)
+        Set to true if the signal corresponds to a real function; the result
+        is then real.
 
     N: int (optional)
         Bandwidth. If `N == -1` then the bandwidth is automatically inferred.
+        Otherwise `omega` is padded with zeros or truncated to length ``N**2``.
 
-    berezin: float (optional, default=True)
-        Use Berezin multipliers instead of Hoppe-Yau.
+    berezin: bool (optional, default=True)
+        Use Berezin multipliers instead of Hoppe-Yau, i.e., multiply the
+        coefficients by :func:`quflow.utils.berezin_multipliers` before the
+        transform. Use ``berezin=False`` for the plain inverse of
+        :func:`fun2shc`.
 
     Returns
     -------
     f: ndarray, shape (N, 2*N-1)
+        Function values on the grid of :func:`quflow.utils.sphgrid`.
     """
 
     # Check that the input is correct
@@ -271,16 +362,19 @@ def shc2fun(omega, isreal=False, N=-1, berezin=True):
 def shc2shr(omega_complex):
     """
     Convert from complex to real spherical harmonics.
-    (See https://en.wikipedia.org/wiki/Spherical_harmonics#Real_form)
+    (See https://en.wikipedia.org/wiki/Spherical_harmonics#Real_form,
+    but note that the sign for ``m < 0`` is opposite; see the module docstring.)
     If `omega_complex` does not correspond to a real function this is a projection.
+
+    Inverse of :func:`shr2shc`.
 
     Parameters
     ----------
-    omega_complex: ndarray
+    omega_complex: ndarray, shape (N**2,), complex
 
     Returns
     -------
-    omega_real: ndarray
+    omega_real: ndarray, shape (N**2,), float
     """
     el = 0
     omega_real = np.zeros(omega_complex.shape[0], dtype=float)
@@ -310,7 +404,10 @@ def shc2shr(omega_complex):
 def shr2shc(omega_real):
     """
     Convert from real to complex spherical harmonics.
-    (See https://en.wikipedia.org/wiki/Spherical_harmonics#Real_form)
+    (See https://en.wikipedia.org/wiki/Spherical_harmonics#Real_form,
+    but note that the sign for ``m < 0`` is opposite; see the module docstring.)
+
+    The result describes the same (real) function. Inverse of :func:`shc2shr`.
 
     Parameters
     ----------
@@ -352,14 +449,16 @@ def shr2shc(omega_real):
 def fun2img(f, lim=np.inf):
     """
     Convert a 2D float array to an 8-bit image.
-    Unless given, limits are taken so that the value 128 correspond to 0.0.
+    Unless given, limits are taken so that the value 127 corresponds to 0.0.
 
     Parameters
     ----------
     f: ndarray(shape=(N,M))
     lim: tuple of float or float (default: automatic)
-        The limits of f, corresponding to the values 0 and 255 of the image.
-        The default values are balanced, so that f=0.0 correspond to img=128.
+        The limits of f, corresponding to the values 0 and 255 of the image;
+        values outside are clipped. A single float ``lim`` means
+        ``(-lim, lim)``. The default is ``max(abs(f))``, so that f=0.0
+        corresponds to img=127.
 
     Returns
     -------
@@ -381,18 +480,20 @@ def fun2img(f, lim=np.inf):
 def img2fun(img, lim=1.0):
     """
     Convert an 8-bit image to a 2D float array.
-    Unless given, limits are taken so that the value 0.0 correspond to 128.
+
+    Inverse of :func:`fun2img` (up to the 8-bit quantization), given the same
+    limits.
 
     Parameters
     ----------
     img: ndarray(shape=(N,M), dtype=uint8)
-    lim: tuple of float or float (default: automatic)
+    lim: tuple of float or float (default: 1.0)
         The limits of f, corresponding to the values 0 and 255 of the image.
-        The default values are balanced, so that f=0.0 correspond to img=128.
+        A single float ``lim`` means ``(-lim, lim)``.
 
     Returns
     -------
-    img: ndarray(dtype=uint8)
+    f: ndarray(shape=(N,M), dtype=float)
     """
     if not isinstance(lim, tuple):
         lim = (-lim, lim)
@@ -405,16 +506,19 @@ def fun2shr(f):
     """
     Transform a theta-phi function to real spherical harmonics.
 
+    Inverse of ``shr2fun(omega, berezin=False)``.
+
     Parameters
     ----------
     f: array_like, shape (N, 2*N-1)
         Matrix representing function values in spherical coordinates
-        (theta, phi). Can be either real or complex.
+        (theta, phi), on the grid of :func:`quflow.utils.sphgrid`.
+        For complex `f`, the result describes its real part.
 
     Returns
     -------
-    omega: ndarray
-        Real array of spherical coordinates.
+    omega: ndarray, shape (N**2,), float
+        Real spherical-harmonic coefficients.
     """
     return shc2shr(fun2shc(f))
 
@@ -430,10 +534,24 @@ def shr2fun(omega, N=-1, **kwargs):
 
     N: int (optional)
         Bandwidth. If `N == -1` then the bandwidth is automatically inferred.
+    **kwargs
+        Passed on to :func:`shc2fun`, e.g. ``berezin=False`` (the default
+        applies the Berezin multipliers).
 
     Returns
     -------
-    f: ndarray, shape (N, 2*N-1)
+    f: ndarray, shape (N, 2*N-1), float
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import quflow as qf
+    >>> omega = np.random.default_rng(0).standard_normal(16)
+    >>> f = qf.shr2fun(omega, berezin=False)
+    >>> f.shape
+    (4, 7)
+    >>> bool(np.allclose(qf.fun2shr(f), omega))
+    True
     """
     return shc2fun(shr2shc(omega), isreal=True, N=N, **kwargs)
 
@@ -442,6 +560,12 @@ def as_fun(data, N=-1, **kwargs):
     """
     Take data as either `fun`, `img`, `omegar`, `omegac`, or `mat`
     and convert to `fun` (unless already).
+
+    The format is determined from the shape and dtype: a square complex
+    matrix is `mat` (converted with :func:`shr2fun` if skew-Hermitian,
+    otherwise via :func:`mat2shc` and :func:`shc2fun`), another 2D array is
+    `img` if of dtype uint8 and `fun` otherwise, a real 1D array is
+    `omegar` and a complex 1D array `omegac`.
 
     Parameters
     ----------
@@ -452,6 +576,12 @@ def as_fun(data, N=-1, **kwargs):
     Returns
     -------
     fun: ndarray(shape=(N, 2*N-1), dtype=float or complex)
+
+    Notes
+    -----
+    For a non-skew-Hermitian `mat`, and for `omegac` with `N` given, `N` is
+    passed as the `isreal` argument of :func:`shc2fun`, so the result is
+    real (the imaginary part is lost).
     """
     if data.ndim == 2:
         if data.shape[0] == data.shape[1] and np.iscomplexobj(data):
@@ -490,6 +620,9 @@ def as_shr(data):
     """
     Take data as either `fun`, `img`, `omegar`, `omegac`, or `mat`
     and convert to `omegar` (unless already).
+
+    The format is determined as in :func:`as_fun`. An `img` is converted
+    with the default limits of :func:`img2fun`.
 
     Parameters
     ----------

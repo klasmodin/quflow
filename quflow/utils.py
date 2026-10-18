@@ -1,3 +1,7 @@
+"""
+Utility functions: dtype helpers, spherical-harmonic index maps, the
+sampling grid, coordinate conversions and time units.
+"""
 import numpy as np
 # import pyssht
 import os
@@ -8,6 +12,17 @@ from scipy.special import gammaln
 def complex_dtype(dt):
 	"""
 	Return complex dtype corresponding to dt.
+
+	Parameters
+	----------
+	dt : dtype
+		A real or complex floating point dtype.
+
+	Returns
+	-------
+	numpy scalar type
+		The complex type of the same precision, e.g. ``np.cdouble`` for
+		``np.float64`` or ``np.complex128``.
 	"""
 	return {11: np.csingle,
 			12: np.cdouble,
@@ -20,6 +35,17 @@ def complex_dtype(dt):
 def real_dtype(dt):
 	"""
 	Return real dtype corresponding to dt.
+
+	Parameters
+	----------
+	dt : dtype
+		A real or complex floating point dtype.
+
+	Returns
+	-------
+	numpy scalar type
+		The real type of the same precision, e.g. ``np.double`` for
+		``np.float64`` or ``np.complex128``.
 	"""
 	return {11: np.single,
 			12: np.double,
@@ -38,11 +64,16 @@ def poisson_finite_differences(omegafun, psifun):
 	Parameters
 	----------
 	omegafun: ndarray, shape=(N,2*N-1)
+		Function values on the grid of :func:`sphgrid`.
 	psifun: ndarray, shape=(N,2*N-1)
+		Function values on the grid of :func:`sphgrid`.
 
 	Returns
 	-------
-	Approximation to Poisson bracket {omegafun, psifun}.
+	ndarray, shape=(N,2*N-1)
+		Approximation to Poisson bracket {omegafun, psifun}, computed as
+		``(d_theta psi * d_phi omega - d_theta omega * d_phi psi)/sin(theta)``
+		with one-sided differences.
 	"""
 	N = omegafun.shape[0]
 	thetafun, phifun = sphgrid(N)
@@ -74,6 +105,9 @@ def ind2elm(ind):
 	"""
 	Convert single index in omega vector to (el, m) indices.
 
+	Inverse of :func:`elm2ind`: ``el = floor(sqrt(ind))`` and
+	``m = ind - el*(el+1)``.
+
 	Parameters
 	----------
 	ind: int or array(dtype=int)
@@ -93,28 +127,48 @@ def elm2ind(el, m):
 	Convert (el,m) spherical harmonics indices to single index
 	in `omegacomplex` array.
 
+	The index is ``el*(el+1) + m``, used for both real and complex
+	coefficient vectors. Coefficients with ``el < N`` fill a vector of
+	length ``N**2``.
+
 	Parameters
 	----------
 	el: int or ndarray of ints
+		Degree, ``el >= 0``.
 	m: int or ndarray of ints
+		Order, ``-el <= m <= el``.
 
 	Returns
 	-------
-	ind: int
+	ind: int or ndarray of ints
 	"""
 	return el*el + el + m
 
 
 def berezin_multipliers(N, dtype=np.float64, el=None):
-	"""
-	Returns the spherical harmonics scalings $w_\ell = \sqrt{\prod_{j=0}^\ell \frac{N-j}{N+j}}$
+	r"""
+	Returns the spherical harmonics scalings
+	:math:`w_\ell = \sqrt{\prod_{j=1}^\ell \frac{N-j}{N+j}}`
 	which converts the Hoppe-Yau quantization T_N to the Berezin-Toeplitz quantization Q_N.
+
+	The multipliers decrease from :math:`w_0 = 1` and act as a smoothing
+	filter; they are applied by default in :func:`quflow.shr2fun` and
+	:func:`quflow.shc2fun`.
 
 	Parameters
 	----------
-	N: size of matrix
+	N: int
+		Size of matrix.
 	dtype: dtype of float
-	el: wavenumbers to include (defaults to ind2elm(np.arange(N**2)))
+		Default is ``np.float64``.
+	el: int or array of int, optional
+		Wavenumbers to include (defaults to ind2elm(np.arange(N**2))[0], i.e.,
+		one multiplier per entry of a coefficient vector).
+
+	Returns
+	-------
+	ndarray
+		The multipliers :math:`w_\ell`.
 	"""
 	if el is None:
 		ells, ms = ind2elm(np.arange(N**2))
@@ -144,10 +198,13 @@ def cart2sph(x, y, z):
 	x: ndarray
 	y: ndarray
 	z: ndarray
+		Coordinates (arrays; scalar input is not supported).
 
 	Returns
 	-------
 	(theta, phi): tuple of ndarray
+		Inclination ``theta`` in ``[0, pi]`` and azimuth ``phi`` in
+		``[0, 2*pi)``. Inverse of :func:`sph2cart` on the unit sphere.
 	"""
 	phi = np.arctan2(y, x)
 	theta = np.arctan2(np.sqrt(x * x + y * y), z)
@@ -163,11 +220,14 @@ def sph2cart(theta, phi):
 	Parameters
 	----------
 	theta: ndarray
-	phi: ndarry
+		Inclination, ``0 <= theta <= pi``.
+	phi: ndarray
+		Azimuth.
 
 	Returns
 	-------
 	(x, y, z): tuple of ndarray
+		``(sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta))``.
 	"""
 	x = np.sin(theta) * np.cos(phi)
 	y = np.sin(theta) * np.sin(phi)
@@ -192,6 +252,14 @@ def sphgrid(N):
 		Matrices of shape (N, 2*N-1) such that row-indices corresponds to
 		theta variations and column-indices corresponds to phi variations.
 		(Notice that phi is periodic but theta is not.)
+
+	Notes
+	-----
+	This is the McEwen-Wiaux ("MW") sampling used by
+	:mod:`quflow.transforms`:
+	``theta_j = (2j+1)*pi/(2N-1)`` for ``j = 0, ..., N-1`` (so the last row
+	is the south pole, ``theta = pi``), and ``phi_k = 2*pi*k/(2N-1)`` for
+	``k = 0, ..., 2N-2``.
 	"""
 	# theta, phi = pyssht.sample_positions(N, Grid=True)
 
@@ -206,6 +274,9 @@ def sphgrid(N):
 def qtime2seconds(qtime, N):
 	"""
 	Convert quantum time units to seconds.
+
+	Computes ``qtime*hbar(N)``: one quantum time unit corresponds to the
+	dimensionless step ``h = dt/hbar`` used by the integrators.
 
 	Parameters
 	----------
@@ -225,6 +296,8 @@ def seconds2qtime(t, N):
 	"""
 	Convert seconds to quantum time unit.
 
+	Computes ``t/hbar(N)``; inverse of :func:`qtime2seconds`.
+
 	Parameters
 	----------
 	t: float or ndarray
@@ -241,17 +314,27 @@ def seconds2qtime(t, N):
 
 def run_cluster(filename, time, inner_time, step_size):
 	"""
+	Write a run script and a SLURM batch script for a cluster simulation (legacy).
+
+	Fills in the templates in ``quflow/templates`` and writes
+	``run_<simname>.py`` and ``vera2_<simname>.sh`` next to `filename`.
+	Superseded by :mod:`quflow.cluster`; the current templates no longer
+	contain most of the placeholders filled in here.
 
 	Parameters
 	----------
-	filename
-	time
-	inner_time
-	step_size
+	filename : str
+		Simulation file (``*.hdf5``).
+	time : float
+		Simulation time.
+	inner_time : float
+		Time between saved states.
+	step_size : float
+		Time step.
 
 	Returns
 	-------
-
+	None
 	"""
 	from . import templates
 
