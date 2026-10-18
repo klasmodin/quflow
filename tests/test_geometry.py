@@ -148,8 +148,8 @@ def test_bracket_convergence(N):
     laplace_omega = np.zeros_like(omega)
     laplace_omega[1:] = omega[1:]*ell*(ell+1)
 
-    f = qf.shr2fun(omega, N=512)
-    g = qf.shr2fun(psi, N=512)
+    f = qf.shr2fun(omega, N=512, berezin=False)
+    g = qf.shr2fun(psi, N=512, berezin=False)
     fg = qf.poisson_finite_differences(f, g)
     omegapsi = qf.fun2shr(fg)
 
