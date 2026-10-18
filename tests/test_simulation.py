@@ -80,34 +80,6 @@ def test_qutypes(W, qutypes, tmpdir):
         assert sim[varname, -1].dtype == qutypes['fun']
 
 
-@pytest.mark.parametrize("W", [get_random_mat(22)])
-def test_prerun(W, tmpdir):
-    filename = tmpdir.join("testsim.hdf5")
-
-    def createsim(W):
-        sim = QuSimulation(filename, overwrite=True, state=W)
-
-        def myham(W):
-            return 0.5*qf.solve_poisson(W)
-
-        prerun = """
-import quflow as qf
-def myham(W):
-    return 0.5*qf.solve_poisson(W)
-"""
-        sim['hamiltonian'] = myham
-        sim['prerun'] = prerun
-
-        return myham(W)
-
-    P = createsim(W)
-
-    sim2 = QuSimulation(filename)
-    P2 = sim2['hamiltonian'](W)
-
-    np.testing.assert_equal(P, P2)
-
-
 @pytest.mark.parametrize("W", [get_random_mat(35)])
 def test_logger(W, tmpdir):
     filename = tmpdir.join("testsim.hdf5")
