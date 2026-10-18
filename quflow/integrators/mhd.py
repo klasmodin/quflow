@@ -106,14 +106,15 @@ def magmp_fixedpoint_old(state,
     time: float or None (default)
         Time at the initial state. If `None` the system is assumed to
         be autonomous, and the time parameter is not passed to the hamiltonian and forcing.
-        The time is in the same (dimensionless) units as `stepsize`, and is
-        only advanced if it is nonzero.
+        The time is in the same (dimensionless) units as `stepsize`.
     forcing: function(P, state) or function(P, state, time) or None (default)
         Extra force function (to allow non-isospectral perturbations),
         returning an array shaped like `state`, in physical time units.
     stats: dict or None
-        Dictionary to be filled in with integration statistics (``'tol'``,
-        ``'iterations'`` and ``'maxit'``; only if it is not empty).
+        Dictionary to be filled in with integration statistics
+        (``'tol_auto'`` when automatic, ``'iterations'`` and
+        ``'number_of_maxit'``, as for
+        :func:`quflow.integrators.isospectral.isomp_fixedpoint`).
     callback: function(state, dstate) or None (default)
         Callback function evaluated at the end of every step, 
         just before the state is updated. ``dstate`` contains only the
@@ -145,7 +146,7 @@ def magmp_fixedpoint_old(state,
         autonomous_force = True
         if time is not None and 'time' in inspect.getfullargspec(forcing).args:
             autonomous_force = False
-            FW = np.zeros_like(state)
+        FW = np.zeros_like(state)  # Own buffer for the scaled force
     
     # Check if autonomous
     autonomous = True
@@ -163,6 +164,7 @@ def magmp_fixedpoint_old(state,
     Pstatecomm = np.zeros_like(state)
     BThetacomm = np.zeros_like(state[0,:,:])
     BThetaPhalf = np.zeros_like(BThetacomm)
+    Phalf, Bhalf = None, None  # Scaled (P, B) (own buffers, allocated at first use)
     # PWPhalf = np.zeros_like(W)
     hhalf = stepsize/2.0
     hb = hbar(N=state.shape[-1])
@@ -177,8 +179,8 @@ def magmp_fixedpoint_old(state,
             tol = np.sqrt(mach_eps)*stepsize*np.linalg.norm(state, np.inf)
         if verbatim:
             print("Tolerance set to {}.".format(tol))
-        if stats:
-            stats['tol'] = tol
+        if stats is not None:
+            stats['tol_auto'] = tol
 
     # --- Beginning of step loop ---
     for k in range(steps):
@@ -204,11 +206,16 @@ def magmp_fixedpoint_old(state,
 
             # Update Ptilde
             if autonomous:
-                Phalf, Bhalf = hamiltonian(statehalf)
+                P, B = hamiltonian(statehalf)
             else:
-                Phalf, Bhalf = hamiltonian(statehalf, time=time + hhalf)
-            Phalf *= hhalf
-            Bhalf *= hhalf
+                P, B = hamiltonian(statehalf, time=time + hhalf)
+            # Scale into own buffers (the arrays returned by the hamiltonian are not modified)
+            if Phalf is None or Phalf.shape != P.shape:
+                Phalf = np.empty_like(P)
+            if Bhalf is None or Bhalf.shape != B.shape:
+                Bhalf = np.empty_like(B)
+            np.multiply(P, hhalf, out=Phalf)
+            np.multiply(B, hhalf, out=Bhalf)
 
             # Compute middle variables
             # PWcomm = Phalf @ Whalf  # old
@@ -231,10 +238,10 @@ def magmp_fixedpoint_old(state,
             # Add forcing if needed
             if forcing is not None:
                 if autonomous_force:
-                    FW = forcing(Phalf/hhalf, statehalf)
+                    F = forcing(P, statehalf)
                 else:
-                    FW = forcing(Phalf/hhalf, statehalf, time=time + hhalf)
-                FW *= hhalf*hb
+                    F = forcing(P, statehalf, time=time + hhalf)
+                np.multiply(F, hhalf*hb, out=FW)  # The array returned by the forcing is not modified
                 dstate += FW
 
             # Check if time to break
@@ -276,16 +283,16 @@ def magmp_fixedpoint_old(state,
             FW *= 2
             state += FW
 
-        if time:
+        if time is not None:
             time += stepsize
 
         # --- End of step ---
 
     if verbatim:
         print("Average number of iterations per step: {:.2f}".format(total_iterations/steps))
-    if stats:
+    if stats is not None:
         stats["iterations"] = total_iterations/steps
-        stats["maxit"] = number_of_maxit/steps
+        stats["number_of_maxit"] = number_of_maxit/steps
 
     return state
 
@@ -348,18 +355,19 @@ def magmp_fixedpoint(W,
         Number of steps to take. Default is 100.
     hamiltonian: function(state) or function(state, time)
         The Hamiltonian returning the pair ``(P, B)``. Default is
-        :func:`solve_mhd`. The returned arrays are scaled in place.
+        :func:`solve_mhd`. The returned arrays are not modified.
     time: float or None (default)
         Time at the initial state. If `None` the system is assumed to
         be autonomous, and the time parameter is not passed to the hamiltonian and forcing.
     forcing: function(P, state) or function(P, state, time) or None (default)
         Extra force function (to allow non-isospectral perturbations),
-        returning an array shaped like the state. The returned array is
-        scaled in place.
+        returning an array shaped like the state. The returned array is not
+        modified, so the function may return a stored array.
     stats: dict or None
-        Dictionary to be filled in with integration statistics (``'tol'``
-        when automatic, ``'iterations'`` and ``'maxit'``; only if it is not
-        empty).
+        Dictionary to be filled in with integration statistics
+        (``'tol_auto'`` when automatic, ``'iterations'`` and
+        ``'number_of_maxit'``, as for
+        :func:`quflow.integrators.isospectral.isomp_fixedpoint`).
     callback: function(state, dstate) or None (default)
         Callback function evaluated at the end of every step, 
         just before the state is updated. ``dstate`` contains only the
@@ -394,7 +402,7 @@ def magmp_fixedpoint(W,
     :math:`\Theta`, strong or small-scale magnetic fields need small steps.
     If the iteration does not converge within `maxit` iterations, the
     conservation properties hold only up to the iteration error; the fraction
-    of such steps is reported in ``stats['maxit']``.
+    of such steps is reported in ``stats['number_of_maxit']``.
 
     Examples
     --------
@@ -428,7 +436,7 @@ def magmp_fixedpoint(W,
     autonomous = True
     if time is not None:
         try:
-            Phalf = hamiltonian(W, time=time)
+            hamiltonian(W, time=time)
         except TypeError:
             pass
         else:
@@ -445,6 +453,7 @@ def magmp_fixedpoint(W,
     PWcomm = np.zeros_like(W)
     BThetacomm = np.zeros_like(W[0,:,:])
     BThetaPhalf = np.zeros_like(BThetacomm)
+    Phalf, Bhalf = None, None  # Scaled (P, B) (own buffers, allocated at first use)
 
     # PWPhalf = np.zeros_like(W)
     # dthalf = dt/2.0
@@ -462,8 +471,8 @@ def magmp_fixedpoint(W,
             tol = (mach_eps*dt/hb)*np.linalg.norm(W, np.inf)
         if verbatim:
             print("Tolerance set to {}.".format(tol))
-        if stats:
-            stats['tol'] = tol
+        if stats is not None:
+            stats['tol_auto'] = tol
 
     # --- Beginning of step loop ---
     for k in range(steps):
@@ -489,11 +498,16 @@ def magmp_fixedpoint(W,
 
             # Update Ptilde
             if autonomous:
-                Phalf, Bhalf = hamiltonian(Whalf)
+                P, B = hamiltonian(Whalf)
             else:
-                Phalf, Bhalf = hamiltonian(Whalf, time=time + dt/2)
-            Phalf *= vareps
-            Bhalf *= vareps
+                P, B = hamiltonian(Whalf, time=time + dt/2)
+            # Scale into own buffers (the arrays returned by the hamiltonian are not modified)
+            if Phalf is None or Phalf.shape != P.shape:
+                Phalf = np.empty_like(P)
+            if Bhalf is None or Bhalf.shape != B.shape:
+                Bhalf = np.empty_like(B)
+            np.multiply(P, vareps, out=Phalf)
+            np.multiply(B, vareps, out=Bhalf)
 
             # Compute middle variables
             # PWcomm = Phalf @ Whalf  # old
@@ -515,13 +529,13 @@ def magmp_fixedpoint(W,
 
             # Add forcing if needed
             if forcing:
-                # Compute forcing if needed
-                Phalf /= vareps
+                # Compute forcing if needed (scaled into own buffer FW,
+                # so the array returned by the forcing is not modified)
                 if autonomous_force:
-                    FW = forcing(Phalf, Whalf)
+                    F = forcing(P, Whalf)
                 else:
-                    FW = forcing(Phalf, Whalf, time=time + dt/2)
-                FW *= dt/2
+                    F = forcing(P, Whalf, time=time + dt/2)
+                np.multiply(F, dt/2, out=FW)
                 dW += FW
 
             # Check if time to break
@@ -570,9 +584,9 @@ def magmp_fixedpoint(W,
 
     if verbatim:
         print("Average number of iterations per step: {:.2f}".format(total_iterations/steps))
-    if stats:
+    if stats is not None:
         stats["iterations"] = total_iterations/steps
-        stats["maxit"] = number_of_maxit/steps
+        stats["number_of_maxit"] = number_of_maxit/steps
 
     return W
 
