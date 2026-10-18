@@ -239,9 +239,8 @@ def _dot_cpu_skewh2(lap, P, W):
     """
     Apply a tridiagonal operator to a skew-Hermitian matrix (unused variant).
 
-    Computes the strict lower triangle of ``W = lap(P)`` and fills the upper
-    triangle by skew-Hermitian symmetry. Note that the diagonal of `W` is not
-    computed. Use :func:`_dot_cpu_skewh` instead.
+    Computes the lower triangle (including the diagonal) of ``W = lap(P)``
+    and fills the upper triangle by skew-Hermitian symmetry.
 
     Parameters
     ----------
@@ -250,7 +249,7 @@ def _dot_cpu_skewh2(lap, P, W):
     P : ndarray, shape (N, N), complex
         Input skew-Hermitian matrix.
     W : ndarray, shape (N, N), complex
-        Output matrix (overwritten, except its diagonal).
+        Output matrix (overwritten).
 
     Returns
     -------
@@ -259,13 +258,14 @@ def _dot_cpu_skewh2(lap, P, W):
     """
     N = P.shape[0]
     for i in prange(N):
-        for j in range(i):
+        for j in range(i+1):
             W[i, j] = lap[i, j, 0]*P[i, j]
             if i < N-1 and j < N-1:
                 W[i, j] += lap[i+1, j+1, 1]*P[i+1, j+1]
             if i > 0 and j > 0:
                 W[i, j] += lap[i, j, 1]*P[i-1, j-1]
-            W[j, i] = -np.conj(W[i,j])
+            if j < i:
+                W[j, i] = -np.conj(W[i,j])
     return W
 
 
@@ -361,7 +361,7 @@ _dot_cpu = _dot_cpu_generic
 
 
 @njit(parallel=True, error_model='numpy', fastmath=True)
-def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
+def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex, remove_trace):
     """
     Function for solving the quantized
     Poisson equation (or more generally the equation defined by
@@ -382,6 +382,9 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
         Float buffer.
     buffer_complex: ndarray(shape=(N, N), dtype=complex)
         Complex buffer.
+    remove_trace: bool
+        Whether to remove the trace of the right-hand side and of the
+        solution (for the Poisson equation); see Notes.
 
     Returns
     -------
@@ -390,11 +393,12 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
 
     Notes
     -----
-    On the main diagonal (``m = 0``), the mean of the diagonal of `W`
-    (``trace(W)/N``) is subtracted from the right-hand side, and the trace of
-    the solution is removed afterwards. With `lap` from
-    ``laplacian(N, bc=True)`` this gives the trace-free solution of the
-    Poisson equation. The same is done for any other operator `lap`.
+    If `remove_trace` is true, then on the main diagonal (``m = 0``) the mean
+    of the diagonal of `W` (``trace(W)/N``) is subtracted from the
+    right-hand side, and the trace of the solution is removed afterwards.
+    With `lap` from ``laplacian(N, bc=True)`` this gives the trace-free
+    solution of the (singular) Poisson equation. For non-singular operators,
+    such as those of :func:`solve_heat`, use ``remove_trace=False``.
     """
     N = W.shape[0]
 
@@ -407,7 +411,7 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
         i, j = mk2ij(m, 0)
         buffer_float[i, j] = lap[i, j, 0]
         buffer_complex[i, j] = W[i, j]
-        if m==0:
+        if m==0 and remove_trace:
             # Compute circulation (scaled trace) of W matrix
             trW = W[0, 0]
             for k in range(1, N):
@@ -423,7 +427,7 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
             w = lap[i, j, 1]/buffer_float[im, jm]
             buffer_float[i, j] = lap[i, j, 0] - w*lap[i, j, 1]
             buffer_complex[i, j] = W[i, j] - w*buffer_complex[im, jm]
-            if m==0:
+            if m==0 and remove_trace:
                 buffer_complex[i, j] -= trW
 
         # Backward sweep
@@ -436,7 +440,7 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
             P[i, j] = (buffer_complex[i, j] - lap[ip, jp, 1]*P[ip, jp])/buffer_float[i, j]
             # P[j, i] = np.conj(P[i, j])
 
-        if m==0:
+        if m==0 and remove_trace:
             # Make sure the trace of P vanishes (corresponds to bc for laplacian)
             trP = P[0, 0]
             for k in range(1, N):
@@ -457,7 +461,7 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
 
 
 @njit(parallel=True, error_model='numpy', fastmath=True)
-def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
+def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex, remove_trace):
     """
     Function for solving the quantized
     Poisson equation (or more generally the equation defined by
@@ -481,6 +485,9 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
         Float buffer.
     buffer_complex: ndarray(shape=(N, N), dtype=complex)
         Complex buffer.
+    remove_trace: bool
+        Whether to remove the trace of the right-hand side and of the
+        solution (for the Poisson equation); see Notes.
 
     Returns
     -------
@@ -489,11 +496,12 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
 
     Notes
     -----
-    On the main diagonal (``m = 0``), the mean of the diagonal of `W`
-    (``trace(W)/N``) is subtracted from the right-hand side, and the trace of
-    the solution is removed afterwards. With `lap` from
-    ``laplacian(N, bc=True)`` this gives the trace-free solution of the
-    Poisson equation. The same is done for any other operator `lap`.
+    If `remove_trace` is true, then on the main diagonal (``m = 0``) the mean
+    of the diagonal of `W` (``trace(W)/N``) is subtracted from the
+    right-hand side, and the trace of the solution is removed afterwards.
+    With `lap` from ``laplacian(N, bc=True)`` this gives the trace-free
+    solution of the (singular) Poisson equation. For non-singular operators,
+    such as those of :func:`solve_heat`, use ``remove_trace=False``.
     """
     N = W.shape[0]
 
@@ -504,7 +512,7 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
         i, j = mk2ij(m, 0)
         buffer_float[i, j] = lap[i, j, 0]
         buffer_complex[i, j] = W[i, j]
-        if m==0:
+        if m==0 and remove_trace:
             # Compute circulation (scaled trace) of W matrix
             trW = W[0, 0]
             for k in range(1, N):
@@ -520,7 +528,7 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
             w = lap[i, j, 1]/buffer_float[im, jm]
             buffer_float[i, j] = lap[i, j, 0] - w*lap[i, j, 1]
             buffer_complex[i, j] = W[i, j] - w*buffer_complex[im, jm]
-            if m==0:
+            if m==0 and remove_trace:
                 buffer_complex[i, j] -= trW
 
         # Backward sweep
@@ -535,7 +543,7 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
             if m != 0:
                 P[j, i] = -np.conj(P[i, j])
         
-        if m==0:
+        if m==0 and remove_trace:
             # Experimental bc
             # P[-1, -1] = 0.0
 
@@ -559,7 +567,7 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
 
 
 @njit(parallel=True, error_model='numpy', fastmath=True)
-def _solve_cpu_generic(lap, W, P, buffer_float, buffer_complex):
+def _solve_cpu_generic(lap, W, P, buffer_float, buffer_complex, remove_trace):
     """
     Solve the tridiagonal system for an arbitrary matrix, in a flat layout.
 
@@ -569,7 +577,7 @@ def _solve_cpu_generic(lap, W, P, buffer_float, buffer_complex):
     followed by the lower diagonal ``m - N`` (the two are decoupled since the
     coupling coefficient vanishes at the start of a diagonal). This mirrors a
     grid-stride loop on a GPU. Trace handling on the main diagonal is as in
-    :func:`_solve_cpu_skewh`. Gives wrong results for ``N = 2``.
+    :func:`_solve_cpu_skewh`.
 
     Parameters
     ----------
@@ -583,6 +591,9 @@ def _solve_cpu_generic(lap, W, P, buffer_float, buffer_complex):
         Float buffer.
     buffer_complex: ndarray(shape=(N, N), dtype=complex)
         Complex buffer.
+    remove_trace: bool
+        Whether to remove the trace of the right-hand side and of the
+        solution (for the Poisson equation); see Notes.
 
     Returns
     -------
@@ -616,7 +627,7 @@ def _solve_cpu_generic(lap, W, P, buffer_float, buffer_complex):
         # First element: k = m
         val_float = lap_flat[m, 0]
         val_complex = W_flat[m]
-        if m == 0:
+        if m == 0 and remove_trace:
             # Compute scaled trace
             trW = W_flat[0]
             for k in range(stride, N**2, stride):
@@ -628,13 +639,14 @@ def _solve_cpu_generic(lap, W, P, buffer_float, buffer_complex):
 
         buffer_float_flat[m] = val_float
         buffer_complex_flat[m] = val_complex            
+        k_last = np.int64(m)  # Last index of the sweep (also if it has a single element)
 
         # Forward sweep according to grid-stride
         for k in range(m + stride, N**2, stride):
             w = lap_flat[k, 1]/val_float
             val_float = lap_flat[k, 0] - w*lap_flat[k, 1]
             val_complex = W_flat[k] - w*val_complex
-            if m == 0:
+            if m == 0 and remove_trace:
                 # Correct diagonal
                 val_complex -= trW
             buffer_float_flat[k] = val_float
@@ -650,7 +662,7 @@ def _solve_cpu_generic(lap, W, P, buffer_float, buffer_complex):
             val_complex = P_flat[k]
             val_float = lap_flat[k, 1]
 
-        if m == 0:
+        if m == 0 and remove_trace:
             # Make sure the trace of P vanishes (corresponds to bc for laplacian)
             trP = P_flat[::stride].sum()
             trP /= N
@@ -732,10 +744,9 @@ def _solve_cpu_m_diag(lap, W_m_diag, P_m_diag):
 
     Notes
     -----
-    For the main diagonal (``m = 0``) the trace of the solution is removed,
-    but, unlike the dense solvers, the trace of the right-hand side is not
-    subtracted first. For input with nonzero trace, the result therefore
-    differs from :func:`_solve_cpu_skewh`.
+    For the main diagonal (``m = 0``), as in the dense solvers, the mean of
+    the input diagonal (``trace(W)/N``) is subtracted from the right-hand
+    side, and the trace of the solution is removed.
     """
     N = lap.shape[-2]
     m = N - W_m_diag.shape[-1]
@@ -751,6 +762,13 @@ def _solve_cpu_m_diag(lap, W_m_diag, P_m_diag):
     buffer_float_flat[0] = lap[i, j, 0]
     # buffer_complex[i, j] = W_m_diag[0]
     buffer_complex_flat[0] = W_m_diag[0]
+    if m == 0:
+        # Compute circulation (scaled trace) of W, which is removed from the right hand side
+        trW = W_m_diag[0]
+        for k in range(1, N):
+            trW += W_m_diag[k]
+        trW /= N
+        buffer_complex_flat[0] -= trW
 
     # Forward sweep
     for k in range(1, N-absm):
@@ -763,6 +781,8 @@ def _solve_cpu_m_diag(lap, W_m_diag, P_m_diag):
         buffer_float_flat[k] = lap[i, j, 0] - w*lap[i, j, 1]
         # buffer_complex[i, j] = W[i, j] - w*buffer_complex[im, jm]
         buffer_complex_flat[k] = W_m_diag[k] - w*buffer_complex_flat[k-1]
+        if m == 0:
+            buffer_complex_flat[k] -= trW
 
     # Backward sweep
     i, j = mk2ij(m, N-absm-1)
@@ -836,8 +856,8 @@ def allocate_buffer(W):
     Allocate the work and output buffers for matrices like `W`.
 
     The buffers (keys ``'complex'``, ``'float'`` and ``'P'``) are stored in
-    ``_cpu_buffer_cache[N]``, replacing earlier ones for the same `N`, and are
-    used by :func:`solve_heat`, :func:`solve_helmholtz`,
+    ``_cpu_buffer_cache[(N, dtype)]``, replacing earlier ones for the same `N`
+    and dtype, and are used by :func:`solve_heat`, :func:`solve_helmholtz`,
     :func:`solve_globalqg` and :func:`solve_viscdamp`.
 
     Parameters
@@ -855,7 +875,26 @@ def allocate_buffer(W):
     buffer_complex = W.copy()
     buffer_float = W.real.copy()
     P_out = W.copy()
-    _cpu_buffer_cache[N] = {'complex': buffer_complex, 'float': buffer_float, 'P': P_out}
+    _cpu_buffer_cache[(N, W.dtype)] = {'complex': buffer_complex, 'float': buffer_float, 'P': P_out}
+
+
+def _get_buffer(W):
+    """
+    Return the buffers for matrices like `W`, allocating them if needed.
+
+    Parameters
+    ----------
+    W : ndarray, shape (N, N), complex
+
+    Returns
+    -------
+    dict
+        Buffers with keys ``'complex'``, ``'float'`` and ``'P'``.
+    """
+    key = (W.shape[0], W.dtype)
+    if key not in _cpu_buffer_cache:
+        allocate_buffer(W)
+    return _cpu_buffer_cache[key]
 
 
 def laplacian(N, bc=False, dtype=np.float64):
@@ -1001,9 +1040,7 @@ def solve_poisson(W, reduce=select_first):
         Vorticity matrix. In skew-Hermitian mode (the default, see
         :func:`select_skewherm`) it must be skew-Hermitian, and only its upper
         triangle is read. A stack of matrices is first reduced to one matrix
-        by `reduce`. For a sparse ``dia_matrix``, see :func:`laplace`; the
-        sparse path does not subtract the trace of `W` first, so for sparse
-        input with nonzero trace the result differs from the dense one.
+        by `reduce`. A sparse ``dia_matrix`` is handled as in :func:`laplace`.
     reduce: callable(W)
         Function reducing a stack of matrices to one matrix. Default is
         :func:`select_first` (use the first matrix); see also :func:`select_sum`.
@@ -1060,6 +1097,7 @@ def solve_poisson(W, reduce=select_first):
                 _get_cache(W_shape, W.dtype, "real"),
                 # _cpu_buffer_cache[N]['complex']
                 _get_cache(W_shape, W.dtype, "complex"),
+                True,  # Remove trace: the Laplacian is singular on the identity
                 )
 
     return P
@@ -1085,30 +1123,23 @@ def solve_heat(h_times_nu, W0):
     Wh: ndarray(shape=(N, N), dtype=complex)
         Solution after one step. The result is an internal buffer, shared by :func:`solve_heat`,
     :func:`solve_helmholtz`, :func:`solve_globalqg` and :func:`solve_viscdamp`
-    for each `N`: it is overwritten by the next call to any of them. Copy it
-    if it must be kept.
+    for each `N` and dtype: it is overwritten by the next call to any of
+    them. Copy it if it must be kept.
 
     Notes
     -----
-    The solver removes the trace (the :math:`\ell = 0` component) of the
-    right-hand side and of the solution (see :func:`_solve_cpu_skewh`), so the
-    result is trace-free even if `W0` is not.
-
-    The operator and the output buffer are cached per `N` and parameter
-    values, but not per dtype: after a first call with single precision
-    input, later calls with double precision input are computed in single
-    precision (and vice versa).
+    Unlike :func:`solve_poisson`, the trace (the :math:`\ell = 0` component)
+    is kept: the operator is not singular, and the equation holds on all
+    entries, including the diagonal.
     """
     global _cpu_heat_cache
 
     N = W0.shape[0]
 
-    if (N, h_times_nu) not in _cpu_heat_cache:
+    key = (N, h_times_nu, W0.dtype)
+    if key not in _cpu_heat_cache:
         # Get cpu laplacian
         lap = laplacian(N, bc=False, dtype=type(W0[0, 0].real))
-
-        # Allocate buffer
-        allocate_buffer(W0)
 
         # Get cpu operator for backward Euler
         heat = lap.copy()
@@ -1117,14 +1148,13 @@ def solve_heat(h_times_nu, W0):
         heat -= h_times_nu*lap
 
         # Store in cache
-        _cpu_heat_cache[(N, h_times_nu)] = heat
+        _cpu_heat_cache[key] = heat
     else:
-        heat = _cpu_heat_cache[(N, h_times_nu)]
+        heat = _cpu_heat_cache[key]
 
-    Wh = _cpu_buffer_cache[N]['P']
-    _solve_cpu(heat, W0, Wh,
-               _cpu_buffer_cache[N]['float'],
-               _cpu_buffer_cache[N]['complex'])
+    buffer = _get_buffer(W0)
+    Wh = buffer['P']
+    _solve_cpu(heat, W0, Wh, buffer['float'], buffer['complex'], False)
 
     return Wh
 
@@ -1147,31 +1177,24 @@ def solve_helmholtz(W, alpha=1.0):
     P: ndarray(shape=(N, N), dtype=complex)
         Solution. The result is an internal buffer, shared by :func:`solve_heat`,
     :func:`solve_helmholtz`, :func:`solve_globalqg` and :func:`solve_viscdamp`
-    for each `N`: it is overwritten by the next call to any of them. Copy it
-    if it must be kept.
+    for each `N` and dtype: it is overwritten by the next call to any of
+    them. Copy it if it must be kept.
 
     Notes
     -----
-    The solver removes the trace (the :math:`\ell = 0` component) of the
-    right-hand side and of the solution (see :func:`_solve_cpu_skewh`), so the
-    result is trace-free even if `W` is not.
-
-    The operator and the output buffer are cached per `N` and parameter
-    values, but not per dtype: after a first call with single precision
-    input, later calls with double precision input are computed in single
-    precision (and vice versa).
+    Unlike :func:`solve_poisson`, the trace (the :math:`\ell = 0` component)
+    is kept: the operator is not singular, and the equation holds on all
+    entries, including the diagonal.
     """
     global _cpu_helmholtz_cache
 
     N = W.shape[0]
 
-    if (N, alpha) not in _cpu_helmholtz_cache:
+    key = (N, alpha, W.dtype)
+    if key not in _cpu_helmholtz_cache:
 
         # Get cpu laplacian
         lap = laplacian(N, bc=False, dtype=type(W[0, 0].real))
-
-        # Allocate buffer
-        allocate_buffer(W)
 
         # Get cpu operator for backward Euler
         helmholtz = lap.copy()
@@ -1180,14 +1203,13 @@ def solve_helmholtz(W, alpha=1.0):
         helmholtz -= alpha*lap
 
         # Store in cache
-        _cpu_helmholtz_cache[(N, alpha)] = helmholtz
+        _cpu_helmholtz_cache[key] = helmholtz
     else:
-        helmholtz = _cpu_helmholtz_cache[(N, alpha)]
+        helmholtz = _cpu_helmholtz_cache[key]
 
-    P = _cpu_buffer_cache[N]['P']
-    _solve_cpu(helmholtz, W, P,
-               _cpu_buffer_cache[N]['float'],
-               _cpu_buffer_cache[N]['complex'])
+    buffer = _get_buffer(W)
+    P = buffer['P']
+    _solve_cpu(helmholtz, W, P, buffer['float'], buffer['complex'], False)
 
     return P
 
@@ -1195,7 +1217,7 @@ def solve_helmholtz(W, alpha=1.0):
 def solve_globalqg(W, gamma=1.0):
     r"""
     Solve the inhomogeneous Helmholtz equation
-    of the global quasi-geostrophic model for the stream matrix.
+    of the global quasi-geostrophic (QG) model for the stream matrix.
 
     The equation solved is
 
@@ -1221,32 +1243,24 @@ def solve_globalqg(W, gamma=1.0):
     P: ndarray(shape=(N, N), dtype=complex)
         Solution. The result is an internal buffer, shared by :func:`solve_heat`,
     :func:`solve_helmholtz`, :func:`solve_globalqg` and :func:`solve_viscdamp`
-    for each `N`: it is overwritten by the next call to any of them. Copy it
-    if it must be kept.
+    for each `N` and dtype: it is overwritten by the next call to any of
+    them. Copy it if it must be kept.
 
     Notes
     -----
-    The solver removes the trace of the right-hand side and of the solution
-    (see :func:`_solve_cpu_skewh`). Since this operator is not singular on
-    the main diagonal, the returned `P` does not satisfy the equation on
-    the diagonal; the off-diagonal entries are exact.
-
-    The operator and the output buffer are cached per `N` and parameter
-    values, but not per dtype: after a first call with single precision
-    input, later calls with double precision input are computed in single
-    precision (and vice versa).
+    For :math:`\gamma > 0` the operator is not singular, so, unlike
+    :func:`solve_poisson`, the trace of `P` is not removed: the equation
+    holds on all entries, including the diagonal.
     """
     global _cpu_globalqg_cache
 
     N = W.shape[0]
 
-    if (N, gamma) not in _cpu_globalqg_cache:
+    key = (N, gamma, W.dtype)
+    if key not in _cpu_globalqg_cache:
 
         # Get cpu laplacian
         lap = laplacian(N, bc=False, dtype=type(W[0, 0].real))
-
-        # Allocate buffer
-        allocate_buffer(W)
 
         # Get cpu operator
         globalqg = lap.copy()
@@ -1261,14 +1275,13 @@ def solve_globalqg(W, gamma=1.0):
         # globalqg += lap
 
         # Store in cache
-        _cpu_globalqg_cache[(N, gamma)] = globalqg
+        _cpu_globalqg_cache[key] = globalqg
     else:
-        globalqg = _cpu_globalqg_cache[(N, gamma)]
+        globalqg = _cpu_globalqg_cache[key]
 
-    P = _cpu_buffer_cache[N]['P']
-    _solve_cpu(globalqg, W, P,
-               _cpu_buffer_cache[N]['float'],
-               _cpu_buffer_cache[N]['complex'])
+    buffer = _get_buffer(W)
+    P = buffer['P']
+    _solve_cpu(globalqg, W, P, buffer['float'], buffer['complex'], False)
 
     return P
 
@@ -1305,35 +1318,24 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
     Wh: ndarray(shape=(N, N), dtype=complex)
         Solution after one step. The result is an internal buffer, shared by :func:`solve_heat`,
     :func:`solve_helmholtz`, :func:`solve_globalqg` and :func:`solve_viscdamp`
-    for each `N`: it is overwritten by the next call to any of them. Copy it
-    if it must be kept.
+    for each `N` and dtype: it is overwritten by the next call to any of
+    them. Copy it if it must be kept.
 
     Notes
     -----
-    The solver removes the trace (the :math:`\ell = 0` component) of the
-    right-hand side and of the solution (see :func:`_solve_cpu_skewh`), so the
-    result is trace-free even if `W0` is not.
-
-    The operator is cached per ``(N, h, nu, alpha)``, without `theta`: a
-    call with a different `theta` but the same other parameters reuses the
-    operator of the earlier `theta`, which gives wrong results.
-
-    The operator and the output buffer are cached per `N` and parameter
-    values, but not per dtype: after a first call with single precision
-    input, later calls with double precision input are computed in single
-    precision (and vice versa).
+    Unlike :func:`solve_poisson`, the trace (the :math:`\ell = 0` component)
+    is kept: the operator is not singular, and the equation holds on all
+    entries, including the diagonal.
     """
     global _cpu_viscdamp_cache
 
     N = W0.shape[0]
 
-    if (N, h, nu, alpha) not in _cpu_viscdamp_cache:
+    key = (N, h, nu, alpha, theta, W0.dtype)
+    if key not in _cpu_viscdamp_cache:
 
         # Get cpu laplacian
         lap = laplacian(N, bc=False, dtype=type(W0[0, 0].real))
-
-        # Allocate buffer
-        allocate_buffer(W0)
 
         # Get cpu operator for backward Euler
         viscdamp = lap.copy()
@@ -1342,11 +1344,12 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
         viscdamp -= (h*nu*theta)*lap
 
         # Store in cache
-        _cpu_viscdamp_cache[(N, h, nu, alpha)] = viscdamp
+        _cpu_viscdamp_cache[key] = viscdamp
     else:
-        viscdamp = _cpu_viscdamp_cache[(N, h, nu, alpha)]
+        viscdamp = _cpu_viscdamp_cache[key]
 
-    Wh = _cpu_buffer_cache[N]['P']
+    buffer = _get_buffer(W0)
+    Wh = buffer['P']
 
     # Prepare right hand side in Crank-Nicolson
     if theta == 1:
@@ -1357,8 +1360,6 @@ def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
     if force is not None:
         Wrhs += h*force
 
-    _solve_cpu(viscdamp, Wrhs, Wh,
-               _cpu_buffer_cache[N]['float'],
-               _cpu_buffer_cache[N]['complex'])
+    _solve_cpu(viscdamp, Wrhs, Wh, buffer['float'], buffer['complex'], False)
 
     return Wh
