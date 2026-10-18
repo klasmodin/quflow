@@ -157,7 +157,8 @@ def sectional_curvature(F, G):
     Parameters
     ----------
     F, G : ndarray, shape (N, N), complex
-        Skew-Hermitian matrices spanning the plane.
+        Skew-Hermitian matrices spanning the plane. It is assumed that
+        :math:`\|F\|=\|G\|=1` and :math:`\langle F, G\rangle=0`.
 
     Returns
     -------
