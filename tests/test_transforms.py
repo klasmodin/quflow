@@ -20,7 +20,7 @@ def get_random_omega_complex(N=17):
 @pytest.mark.parametrize("f", [get_fun(), get_fun(N=128), get_fun(N=256)[:128, :255]])
 def test_spherical_harmonics_transform_forward(f):
     omega = qf.fun2shc(f)
-    f = qf.shc2fun(omega)
+    f = qf.shc2fun(omega, berezin=False)
     omega2 = qf.fun2shc(f)
     # assert omega == pytest.approx(omega2)
     np.testing.assert_allclose(omega2, omega, atol=1e-14, rtol=1e-4)
