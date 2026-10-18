@@ -160,3 +160,100 @@ def test_bracket_convergence(N):
 
     np.testing.assert_allclose(WP, WPprime, atol=0.05)
 
+
+
+# --- Documented properties --------------------------------------------------------
+
+def _commutator(A, B):
+    return A@B - B@A
+
+
+@pytest.mark.parametrize("N", [2, 5, 8])
+def test_so3_generators(N):
+    S1, S2, S3 = qf.geometry.so3_generators(N)
+    s = (N - 1)/2
+    for S in (S1, S2, S3):
+        np.testing.assert_allclose(S, -S.conj().T, rtol=0, atol=1e-14)
+    np.testing.assert_allclose(_commutator(S1, S2), S3, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(_commutator(S2, S3), S1, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(_commutator(S3, S1), S2, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(S1@S1 + S2@S2 + S3@S3, -s*(s + 1)*np.eye(N), rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("N", [3, 8])
+def test_cartesian_generators(N):
+    X1, X2, X3 = qf.geometry.cartesian_generators(N)
+    np.testing.assert_allclose(X1@X1 + X2@X2 + X3@X3, -np.eye(N), rtol=0, atol=1e-13)
+    T = lambda m: qf.elmr2mat(1, m, N).toarray()
+    np.testing.assert_allclose(T(-1), np.sqrt(3)*X2, rtol=0, atol=1e-13)
+    np.testing.assert_allclose(T(0), np.sqrt(3)*X3, rtol=0, atol=1e-13)
+    np.testing.assert_allclose(T(1), np.sqrt(3)*X1, rtol=0, atol=1e-13)
+
+
+def test_rotate_direction():
+    N = 6
+    X1, X2, X3 = qf.geometry.cartesian_generators(N)
+    theta = 0.3
+    R = qf.geometry.rotate(np.array([0.0, 0.0, theta]), X1)
+    np.testing.assert_allclose(R, np.cos(theta)*X1 + np.sin(theta)*X2, rtol=0, atol=1e-13)
+
+
+def test_grad_of_coordinate_function():
+    N = 6
+    X1, X2, X3 = qf.geometry.cartesian_generators(N)
+    dP = qf.geometry.grad(X3)
+    np.testing.assert_allclose(dP[0], -X2, rtol=0, atol=1e-13)
+    np.testing.assert_allclose(dP[1], X1, rtol=0, atol=1e-13)
+    np.testing.assert_allclose(dP[2], 0, rtol=0, atol=1e-13)
+
+
+def test_integral_is_el0_coefficient(random_shr):
+    omega = random_shr(7, zero_mean=False)
+    assert abs(qf.geometry.integral(qf.shr2mat(omega)) - omega[0]) < 1e-13
+
+
+def test_norms_of_skew_hermitian(random_skewh):
+    N = 7
+    W = random_skewh(N)
+    sv = np.linalg.svd(W, compute_uv=False)
+    assert abs(qf.geometry.norm_Linf(W) - sv.max()) < 1e-12
+    assert abs(qf.geometry.norm_L1(W) - sv.sum()/N) < 1e-12
+    assert abs(qf.geometry.norm_L2(W) - np.sqrt((sv**2).sum()/N)) < 1e-12
+
+
+def test_bracket_sparse_matches_dense():
+    N = 7
+    A, B = qf.elmr2mat(3, 2, N), qf.elmr2mat(4, -1, N)
+    np.testing.assert_allclose(qf.geometry.bracket(A, B).toarray(),
+                               qf.geometry.bracket(A.toarray(), B.toarray()), rtol=0, atol=1e-13)
+
+
+def test_inner_L2_sparse_same_offsets():
+    N = 7
+    A, B = qf.elmr2mat(3, 2, N), qf.elmr2mat(5, 2, N)
+    assert abs(qf.geometry.inner_L2(A, A) - 1) < 1e-13
+    assert abs(qf.geometry.inner_L2(A, B) - qf.geometry.inner_L2(A.toarray(), B.toarray())) < 1e-13
+
+
+@pytest.mark.xfail(strict=True, reason="inner_L2 uses `*`, which is the matrix product for scipy sparse matrices")
+def test_inner_L2_sparse_and_dense():
+    N = 7
+    A = qf.elmr2mat(3, 2, N)
+    assert abs(qf.geometry.inner_L2(A, A.toarray()) - 1) < 1e-13
+
+
+# --- physics -----------------------------------------------------------------------
+
+def test_energy_and_enstrophy_identities(random_shr):
+    N = 9
+    omega = random_shr(N)  # trace free
+    W = qf.shr2mat(omega)
+    P = qf.solve_poisson(W).copy()
+    E = qf.physics.energy_euler(W)
+    ells = qf.ind2elm(np.arange(1, N**2))[0]
+    np.testing.assert_allclose(E, 0.5*np.sum(omega[1:]**2/(ells*(ells + 1))), rtol=1e-12)
+    np.testing.assert_allclose(E, 0.5*qf.physics.norm_Hm1(W)**2, rtol=1e-12)
+    np.testing.assert_allclose(E, 0.5*qf.physics.norm_H1(P)**2, rtol=1e-12)
+    np.testing.assert_allclose(qf.physics.enstrophy(W), 0.5*np.sum(omega**2), rtol=1e-12)
+    # The trace does not contribute to the energy
+    np.testing.assert_allclose(qf.physics.energy_euler(W + 1j*np.eye(N)), E, rtol=1e-12)
