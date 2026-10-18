@@ -1,0 +1,6 @@
+# Development tools for testing and documentation (in addition to the runtime dependencies).
+# Install with:  python -m pip install -r requirements-dev.txt
+pytest-cov
+sphinx>=7
+numpydoc
+furo
