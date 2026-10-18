@@ -337,17 +337,17 @@ def cartesian_generators(N, dtype=np.complex128):
     return h*S1, h*S2, h*S3
 
 
-def grad(P):
+def sgrad(P):
     r"""
-    Return matrices dP1, dP2, dP3 corresponding to the Cartesian gradient of P.
+    Return matrices dP1, dP2, dP3 corresponding to the symplectic gradient of P.
 
     Computes :math:`dP_a = \frac{1}{\hbar}[X_a, P] = [S_a, P]` for
-    :math:`a = 1, 2, 3` (see :func:`cartesian_generators`).
-
-    Note: in the continuum limit, :math:`\frac{1}{\hbar}[X_a, P]` corresponds
-    to the Poisson bracket :math:`\{x_a, p\}`, i.e., the components of the
-    rotated gradient :math:`\nabla p \times x`, not of the gradient
-    :math:`\nabla p`. For example, ``grad(X3)`` returns ``(-X2, X1, 0)``.
+    :math:`a = 1, 2, 3` (see :func:`cartesian_generators`), the quantized
+    Poisson brackets :math:`\{x_a, p\}`. In the continuum limit these are the
+    Cartesian components of the symplectic gradient (Hamiltonian vector
+    field) of :math:`p`, :math:`\nabla p \times x`. For example,
+    ``sgrad(X3)`` returns ``(-X2, X1, 0)``, the rotation about the
+    :math:`x_3`-axis.
 
     Parameters
     ----------

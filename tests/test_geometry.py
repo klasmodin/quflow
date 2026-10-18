@@ -198,10 +198,10 @@ def test_rotate_direction():
     np.testing.assert_allclose(R, np.cos(theta)*X1 + np.sin(theta)*X2, rtol=0, atol=1e-13)
 
 
-def test_grad_of_coordinate_function():
+def test_sgrad_of_coordinate_function():
     N = 6
     X1, X2, X3 = qf.geometry.cartesian_generators(N)
-    dP = qf.geometry.grad(X3)
+    dP = qf.geometry.sgrad(X3)
     np.testing.assert_allclose(dP[0], -X2, rtol=0, atol=1e-13)
     np.testing.assert_allclose(dP[1], X1, rtol=0, atol=1e-13)
     np.testing.assert_allclose(dP[2], 0, rtol=0, atol=1e-13)
