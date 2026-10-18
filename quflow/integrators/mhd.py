@@ -4,8 +4,16 @@ import inspect
 
 from ..laplacian import solve_poisson, laplace
 from ..geometry import norm_Linf, hbar
+from . import isospectral as _isospectral
 from .isospectral import commutator, conj_subtract_
-from .isospectral import _SKEW_HERM_
+
+
+def _check_skewherm():
+    # Read the setting at call time (a `from ... import _SKEW_HERM_` copy
+    # would not follow later calls to select_skewherm)
+    if not _isospectral._SKEW_HERM_:
+        raise NotImplementedError("MAGMP only works for skew-Hermitian matrices (see select_skewherm).")
+
 
 def solve_mhd(state):
     """
@@ -80,7 +88,7 @@ def magmp_fixedpoint_old(state,
     # Check input
     assert minit >= 1, "minit must be at least 1."
     assert maxit >= minit, "maxit must be at minit."
-    assert _SKEW_HERM_, "MAGMP only works for skew-Hermitian matrices."
+    _check_skewherm()
 
     # Check if force function is autonomous
     if forcing is not None:
@@ -290,6 +298,7 @@ def magmp_fixedpoint(W,
     # Check input
     assert minit >= 1, "minit must be at least 1."
     assert maxit >= minit, "maxit must be at minit."
+    _check_skewherm()
 
     # Check if force function is autonomous
     if forcing is not None:
