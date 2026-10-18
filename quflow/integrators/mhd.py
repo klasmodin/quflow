@@ -1,3 +1,29 @@
+r"""
+Integrators for quantized magnetohydrodynamics (MHD) on the sphere.
+
+The state is a stack ``V = [W, Theta]`` of two skew-Hermitian
+:math:`N\times N` matrices: the vorticity matrix :math:`W` and the magnetic
+potential matrix :math:`\Theta`. The equations are
+
+.. math::
+
+    \dot W = \frac{1}{\hbar}[P, W] + \frac{1}{\hbar}[B, \Theta], \qquad
+    \dot \Theta = \frac{1}{\hbar}[P, \Theta],
+
+where :math:`(P, B)` is returned by a Hamiltonian function of the state; for
+standard MHD (:func:`solve_mhd`), :math:`\Delta_N P = W` and
+:math:`B = \Delta_N \Theta`.
+
+The default integrator :func:`magmp_fixedpoint` (alias ``magmp``) is a
+second order midpoint method, analogous to the isospectral midpoint method of
+:mod:`quflow.integrators.isospectral`. In numerical tests it conserves the
+spectrum of :math:`\Theta` and the quantities
+:math:`\operatorname{tr}(W\Theta^k)` up to rounding errors (and the
+iteration tolerance).
+
+Both integrators require skew-Hermitian mode (see
+:func:`quflow.integrators.isospectral.select_skewherm`).
+"""
 import numpy as np
 import scipy.linalg
 import inspect
@@ -16,8 +42,22 @@ def _check_skewherm():
 
 
 def solve_mhd(state):
-    """
+    r"""
     Hamiltonian function for the standard MHD system.
+
+    Parameters
+    ----------
+    state : ndarray, shape (2, N, N), complex
+        The state ``[W, Theta]``.
+
+    Returns
+    -------
+    P : ndarray, shape (N, N), complex
+        Stream matrix, :math:`\Delta_N P = W` (see
+        :func:`quflow.laplacian.solve_poisson`; this is an internal buffer
+        that is overwritten by the next call).
+    B : ndarray, shape (N, N), complex
+        :math:`B = \Delta_N \Theta` (a new array).
     """
     W = state[0,:,:]
     Theta = state[1,:,:]
@@ -40,19 +80,25 @@ def magmp_fixedpoint_old(state,
                      verbatim=False, 
                      reinitialize=False
                      ):
-    """
+    r"""
     Time-stepping by magnetic midpoint second order method for skew-Hermitian W
-    using fixed-point iterations. The equations are
-        W' = [P, W] + [B, Theta]
-        Theta' = [P, Theta]
+    using fixed-point iterations (older version, kept for reference).
+
+    Same scheme as :func:`magmp_fixedpoint`, but with the dimensionless step
+    `stepsize` (that is, ``dt/hbar(N)``) instead of the physical time step, so
+    that the equations are effectively
+    :math:`\dot W = [P, W] + [B, \Theta]`,
+    :math:`\dot\Theta = [P, \Theta]` in dimensionless time.
+    Use :func:`magmp_fixedpoint` instead.
 
     Parameters
     ----------
     state: ndarray, shape = (2,N,N)
         Initial state given as the skew-Hermitian vorticity 
-        matrices W = state[0,:,:] and Theta = state[1,:,:].
+        matrices W = state[0,:,:] and Theta = state[1,:,:]
+        (overwritten and returned).
     stepsize: float
-        Time step length.
+        Dimensionless time step length, ``dt/hbar(N)``.
     steps: int
         Number of steps to take.
     hamiltonian: function(state) or function(state, time)
@@ -60,13 +106,18 @@ def magmp_fixedpoint_old(state,
     time: float or None (default)
         Time at the initial state. If `None` the system is assumed to
         be autonomous, and the time parameter is not passed to the hamiltonian and forcing.
-    forcing: function(P, W) or function(P, W, time) or None (default)
-        Extra force function (to allow non-isospectral perturbations).
+        The time is in the same (dimensionless) units as `stepsize`, and is
+        only advanced if it is nonzero.
+    forcing: function(P, state) or function(P, state, time) or None (default)
+        Extra force function (to allow non-isospectral perturbations),
+        returning an array shaped like `state`, in physical time units.
     stats: dict or None
-        Dictionary to be filled in with integration statistics.
-    callback: function(W, dW, stats) or None (default)
+        Dictionary to be filled in with integration statistics (``'tol'``,
+        ``'iterations'`` and ``'maxit'``; only if it is not empty).
+    callback: function(state, dstate) or None (default)
         Callback function evaluated at the end of every step, 
-        just before W is updated W += dW.
+        just before the state is updated. ``dstate`` contains only the
+        :math:`[P, \cdot]` part of the increment.
     tol: float or 'auto' (default)
         Tolerance for iterations. Negative value or "auto" means automatic choice.
     maxit: int
@@ -75,14 +126,13 @@ def magmp_fixedpoint_old(state,
         Minimum number of iterations.
     verbatim: bool
         Print extra information if True. Default is False.
-    compsum: bool
-        Use compensated summation.
     reinitialize: bool
         Whether to re-initiate the iteration vector at every step.
 
     Returns
     -------
-    W: ndarray
+    state: ndarray
+        The state after `steps` steps (the same array as the input).
     """
 
     # Check input
@@ -254,37 +304,73 @@ def magmp_fixedpoint(W,
                      verbatim=False,  
                      reinitialize=False
                      ):
-    """
-    Time-stepping by isospectral midpoint second order method for skew-Hermitian W
-    using fixed-point iterations. This implementation uses compensated summation
-    and other tricks to achieve Brouwer's law for reduced accumulative rounding errors.
+    r"""
+    Time-stepping by the magnetic midpoint second order method for MHD,
+    using fixed-point iterations.
+
+    This is the default MHD integrator, also available as
+    ``quflow.integrators.magmp``. With :math:`h = \Delta t/\hbar`,
+    :math:`\varepsilon = h/2` and :math:`(\tilde P, \tilde B)` the output of
+    `hamiltonian` at the midpoint :math:`(\tilde W, \tilde\Theta)`, each step
+    solves by fixed-point iteration
+
+    .. math::
+
+        \tilde W &= W_n + \varepsilon[\tilde P, \tilde W]
+                    + \varepsilon^2 \tilde P\tilde W\tilde P
+                    + \varepsilon[\tilde B, \tilde\Theta]
+                    + \varepsilon^2(\tilde B\tilde\Theta\tilde P
+                                    + \tilde P\tilde\Theta\tilde B), \\
+        \tilde\Theta &= \Theta_n + \varepsilon[\tilde P, \tilde\Theta]
+                    + \varepsilon^2 \tilde P\tilde\Theta\tilde P,
+
+    and then sets
+
+    .. math::
+
+        W_{n+1} = W_n + h\big([\tilde P, \tilde W] + [\tilde B, \tilde\Theta]\big),
+        \qquad
+        \Theta_{n+1} = \Theta_n + h[\tilde P, \tilde\Theta].
+
+    For :math:`\Theta` this is the isospectral midpoint method (see
+    :mod:`quflow.integrators.isospectral`), so the spectrum of :math:`\Theta`
+    is preserved. The forcing, if given, enters as in
+    :func:`quflow.integrators.isospectral.isomp_fixedpoint`.
 
     Parameters
     ----------
-    W: ndarray
-        Initial skew-Hermitian vorticity matrix (overwritten and returned).
+    W: ndarray, shape (2, N, N), complex
+        Initial state ``[W, Theta]`` of skew-Hermitian matrices (overwritten
+        and returned).
     dt: float
-        Time step length.
+        Time step length in physical time units.
     steps: int
-        Number of steps to take.
-    hamiltonian: function(W) or function(W, time)
-        The Hamiltonian returning a stream matrix.
+        Number of steps to take. Default is 100.
+    hamiltonian: function(state) or function(state, time)
+        The Hamiltonian returning the pair ``(P, B)``. Default is
+        :func:`solve_mhd`. The returned arrays are scaled in place.
     time: float or None (default)
         Time at the initial state. If `None` the system is assumed to
         be autonomous, and the time parameter is not passed to the hamiltonian and forcing.
-    forcing: function(P, W) or function(P, W, time) or None (default)
-        Extra force function (to allow non-isospectral perturbations).
+    forcing: function(P, state) or function(P, state, time) or None (default)
+        Extra force function (to allow non-isospectral perturbations),
+        returning an array shaped like the state. The returned array is
+        scaled in place.
     stats: dict or None
-        Dictionary to be filled in with integration statistics.
-    callback: function(W, dW, stats) or None (default)
+        Dictionary to be filled in with integration statistics (``'tol'``
+        when automatic, ``'iterations'`` and ``'maxit'``; only if it is not
+        empty).
+    callback: function(state, dstate) or None (default)
         Callback function evaluated at the end of every step, 
-        just before W is updated W += dW.
+        just before the state is updated. ``dstate`` contains only the
+        :math:`h[\tilde P, \cdot]` part of the increment.
     tol: float or 'auto' (default)
-        Tolerance for iterations. Negative value or "auto" means automatic choice.
+        Tolerance for iterations. Negative value or "auto" means automatic
+        choice, ``sqrt(eps)*h*norm(W[0], inf)``.
     maxit: int
-        Maximum number of iterations.
+        Maximum number of iterations. Default is 10.
     minit: int
-        Minimum number of iterations.
+        Minimum number of iterations. Default is 1.
     verbatim: bool
         Print extra information if True. Default is False.
     reinitialize: bool
@@ -292,7 +378,33 @@ def magmp_fixedpoint(W,
 
     Returns
     -------
-    W: ndarray
+    W: ndarray, shape (2, N, N), complex
+        The state after `steps` steps (the same array as the input).
+
+    Raises
+    ------
+    NotImplementedError
+        In non-skew-Hermitian mode.
+
+    Notes
+    -----
+    The fixed-point iteration converges only if the step is small enough
+    compared with the magnitude of :math:`\tilde P` and :math:`\tilde B`.
+    Since :math:`B = \Delta_N\Theta` grows with the wavenumbers of
+    :math:`\Theta`, strong or small-scale magnetic fields need small steps.
+    If the iteration does not converge within `maxit` iterations, the
+    conservation properties hold only up to the iteration error; the fraction
+    of such steps is reported in ``stats['maxit']``.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import quflow as qf
+    >>> N = 8
+    >>> rng = np.random.default_rng(0)
+    >>> W = qf.shr2mat(np.r_[0.0, rng.standard_normal(N**2 - 1)], N=N)
+    >>> Theta = qf.shr2mat(np.r_[0.0, 0.2*rng.standard_normal(N**2 - 1)], N=N)
+    >>> state = qf.integrators.magmp(np.array([W, Theta]), dt=0.1*qf.hbar(N), steps=10)
     """
 
     # Check input
