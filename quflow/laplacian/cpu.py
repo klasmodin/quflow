@@ -1,3 +1,46 @@
+r"""
+Quantized Laplacian on the CPU, in a tridiagonal representation.
+
+This is the default Laplacian backend: :mod:`quflow.laplacian` re-exports the
+public functions of this module, so for example ``quflow.solve_poisson`` is
+:func:`solve_poisson` below.
+
+The quantized (Hoppe-Yau) Laplacian acts on complex :math:`N\times N`
+matrices as
+
+.. math::
+
+    \Delta_N P = \sum_{a=1}^{3} [S_a, [S_a, P]]
+               = \frac{1}{\hbar^2}\sum_{a=1}^{3} [X_a, [X_a, P]],
+
+where :math:`S_a` are the so(3) generators of
+:func:`quflow.geometry.so3_generators` and :math:`X_a = \hbar S_a` are the
+matrices of :func:`quflow.geometry.cartesian_generators`. The quantized
+spherical harmonics are eigenvectors,
+:math:`\Delta_N T_{\ell m} = -\ell(\ell+1)\, T_{\ell m}`.
+
+:math:`\Delta_N` maps each diagonal of `P` (the entries :math:`P_{ij}` with
+:math:`j - i = m`, for :math:`-N < m < N`) to itself, and acts on it as a
+symmetric tridiagonal matrix. This module stores :math:`\Delta_N` as an array
+`lap` of shape ``(N, N, 2)`` (see :func:`laplacian`): ``lap[i, j, 0]`` is the
+coefficient of :math:`P_{ij}` in :math:`(\Delta_N P)_{ij}`, and
+``lap[i, j, 1]`` is the coupling between the entries ``(i, j)`` and
+``(i-1, j-1)``. Both applying and inverting :math:`\Delta_N` therefore cost
+:math:`O(N^2)` operations; the solvers use the Thomas algorithm on each
+diagonal, in numba-compiled kernels.
+
+On the main diagonal (:math:`m = 0`) the Laplacian is singular: its kernel is
+spanned by the identity matrix, i.e. the :math:`\ell = 0` mode (the trace).
+:func:`solve_poisson` returns the unique trace-free :math:`P` with
+:math:`\Delta_N P = W - \tfrac{\operatorname{tr} W}{N} I`.
+
+Notes
+-----
+For speed, several functions return internal arrays that are overwritten by
+later calls (see the individual functions). Copy the result if it must be kept.
+
+By default the solvers assume skew-Hermitian matrices; see :func:`select_skewherm`.
+"""
 import numpy as np
 from numba import njit, prange
 import scipy.sparse as sp
@@ -22,6 +65,26 @@ _cpu_cache = dict()
 # ---------------------
 
 def _get_cache(shape, dtype, *args):
+    """
+    Return a cached, zero-initialized work array.
+
+    The same array is returned at every call with the same arguments.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Shape of the array.
+    dtype : dtype
+        Data type of the array.
+    *args
+        Extra keys, to keep several arrays of the same shape and dtype. If
+        ``"real"`` is among them, the array is the real part (a view) of a
+        complex array of the given dtype.
+
+    Returns
+    -------
+    ndarray
+    """
     global _cpu_cache
     key = (shape, dtype, *args)
     if key not in _cpu_cache:
@@ -33,6 +96,24 @@ def _get_cache(shape, dtype, *args):
 
 @njit
 def mk2ij(m, k):
+    """
+    Convert diagonal coordinates ``(m, k)`` to matrix indices ``(i, j)``.
+
+    Here ``m = j - i`` is the diagonal and ``k = min(i, j)`` is the position
+    along it. Inverse of :func:`ij2mk`.
+
+    Parameters
+    ----------
+    m : int
+        Diagonal, ``-N < m < N``.
+    k : int
+        Position along the diagonal, ``0 <= k < N - |m|``.
+
+    Returns
+    -------
+    i, j : int
+        Row and column index.
+    """
     if m >= 0:
         i = k
         j = k + m
@@ -44,6 +125,22 @@ def mk2ij(m, k):
 
 @njit
 def ij2mk(i, j):
+    """
+    Convert matrix indices ``(i, j)`` to diagonal coordinates ``(m, k)``.
+
+    Here ``m = j - i`` is the diagonal and ``k = min(i, j)`` is the position
+    along it. Inverse of :func:`mk2ij`.
+
+    Parameters
+    ----------
+    i, j : int
+        Row and column index.
+
+    Returns
+    -------
+    m, k : int
+        Diagonal and position along it.
+    """
     m = j-i
     if m >= 0:
         k = i
@@ -54,8 +151,16 @@ def ij2mk(i, j):
 
 @njit
 def _compute_cpu_laplacian(N, bc=False, dtype=np.float64):
-    """
+    r"""
     Compute tridiagonal laplacian.
+
+    With ``(m, k)`` the diagonal coordinates of entry ``(i, j)`` (see
+    :func:`mk2ij`) the coefficients are
+
+    .. math::
+
+        \text{lap}[i, j, 0] &= -\big((N-1)(2k + 1 + |m|) - 2k(k + |m|)\big), \\
+        \text{lap}[i, j, 1] &= \sqrt{(k + |m|)(N - k - |m|)\,k\,(N - k)}.
 
     Parameters
     ----------
@@ -64,6 +169,8 @@ def _compute_cpu_laplacian(N, bc=False, dtype=np.float64):
     bc: bool (optional)
         Whether boundary conditions should be added to make the laplacian non-singular.
         Notice that this bc is different from the one used for sparse laplacians.
+        It subtracts 0.5 from ``lap[0, 0, 0]``, which makes the operator on
+        the main diagonal (singular without it) definite.
     dtype: float type
 
     Returns
@@ -97,6 +204,25 @@ def _compute_cpu_laplacian(N, bc=False, dtype=np.float64):
 
 @njit(parallel=False, error_model='numpy', fastmath=True)
 def _dot_cpu_generic(lap, P, W):
+    """
+    Apply a tridiagonal operator to an arbitrary matrix: ``W = lap(P)``.
+
+    Default kernel of :func:`laplace`.
+
+    Parameters
+    ----------
+    lap : ndarray, shape (N, N, 2), float
+        Tridiagonal operator (typically the Laplacian).
+    P : ndarray, shape (N, N), complex
+        Input matrix.
+    W : ndarray, shape (N, N), complex
+        Output matrix (overwritten).
+
+    Returns
+    -------
+    W : ndarray
+        The output array.
+    """
     N = P.shape[0]
     for i in prange(N):
         for j in range(N):
@@ -110,6 +236,27 @@ def _dot_cpu_generic(lap, P, W):
 
 @njit(parallel=False, error_model='numpy', fastmath=True)
 def _dot_cpu_skewh2(lap, P, W):
+    """
+    Apply a tridiagonal operator to a skew-Hermitian matrix (unused variant).
+
+    Computes the strict lower triangle of ``W = lap(P)`` and fills the upper
+    triangle by skew-Hermitian symmetry. Note that the diagonal of `W` is not
+    computed. Use :func:`_dot_cpu_skewh` instead.
+
+    Parameters
+    ----------
+    lap : ndarray, shape (N, N, 2), float
+        Tridiagonal operator.
+    P : ndarray, shape (N, N), complex
+        Input skew-Hermitian matrix.
+    W : ndarray, shape (N, N), complex
+        Output matrix (overwritten, except its diagonal).
+
+    Returns
+    -------
+    W : ndarray
+        The output array.
+    """
     N = P.shape[0]
     for i in prange(N):
         for j in range(i):
@@ -127,6 +274,8 @@ def _dot_cpu_nonskewh(lap, P, W):
     """
     Dot product for tridiagonal operator.
 
+    Computes ``W = lap(P)`` diagonal by diagonal, for an arbitrary matrix `P`.
+
     Parameters
     ----------
     lap: ndarray(shape(N, N, 2), dtype=float)
@@ -134,7 +283,12 @@ def _dot_cpu_nonskewh(lap, P, W):
     P: ndarray(shape=(N,N), dtype=complex)
         Input matrix.
     W: ndarray(shape=(N,N), dtype=complex)
-        Output matrix.
+        Output matrix (overwritten).
+
+    Returns
+    -------
+    W : ndarray
+        The output array.
     """
     N = P.shape[0]
 
@@ -160,6 +314,10 @@ def _dot_cpu_skewh(lap, P, W):
     """
     Dot product for tridiagonal operator, for skew-Hermitian P.
 
+    Computes the diagonals ``m >= 0`` of ``W = lap(P)`` from the upper
+    triangle of `P` (the lower triangle is not read), and fills the lower
+    triangle of `W` by skew-Hermitian symmetry.
+
     Parameters
     ----------
     lap: ndarray(shape(N, N, 2), dtype=float)
@@ -167,7 +325,12 @@ def _dot_cpu_skewh(lap, P, W):
     P: ndarray(shape=(N,N), dtype=complex)
         Input matrix.
     W: ndarray(shape=(N,N), dtype=complex)
-        Output matrix.
+        Output matrix (overwritten).
+
+    Returns
+    -------
+    W : ndarray
+        The output array.
     """
     N = P.shape[0]
 
@@ -205,6 +368,8 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
     the `lap` array). Uses NUMBA to accelerate the
     Thomas algorithm for tridiagonal solver calculations.
 
+    Solves all ``2N - 1`` diagonals, for an arbitrary matrix `W`.
+
     Parameters
     ----------
     lap: ndarray(shape=(N, N, 2), dtype=float)
@@ -212,11 +377,24 @@ def _solve_cpu_nonskewh(lap, W, P, buffer_float, buffer_complex):
     W: ndarray(shape=(N, N), dtype=complex)
         Input matrix.
     P: ndarray(shape=(N, N), dtype=complex)
-        Output matrix.
+        Output matrix (overwritten).
     buffer_float: ndarray(shape=(N, N), dtype=float)
         Float buffer.
     buffer_complex: ndarray(shape=(N, N), dtype=complex)
         Complex buffer.
+
+    Returns
+    -------
+    P : ndarray
+        The output array.
+
+    Notes
+    -----
+    On the main diagonal (``m = 0``), the mean of the diagonal of `W`
+    (``trace(W)/N``) is subtracted from the right-hand side, and the trace of
+    the solution is removed afterwards. With `lap` from
+    ``laplacian(N, bc=True)`` this gives the trace-free solution of the
+    Poisson equation. The same is done for any other operator `lap`.
     """
     N = W.shape[0]
 
@@ -286,6 +464,11 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
     the `lap` array). Uses NUMBA to accelerate the
     Thomas algorithm for tridiagonal solver calculations.
 
+    Version for skew-Hermitian `W` (the default solver): only the diagonals
+    ``m >= 0`` are solved, reading the upper triangle of `W` (the lower
+    triangle is not read), and the lower triangle of `P` is filled by
+    skew-Hermitian symmetry.
+
     Parameters
     ----------
     lap: ndarray(shape=(N, N, 2), dtype=float)
@@ -293,11 +476,24 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
     W: ndarray(shape=(N, N), dtype=complex)
         Input matrix.
     P: ndarray(shape=(N, N), dtype=complex)
-        Output matrix.
+        Output matrix (overwritten).
     buffer_float: ndarray(shape=(N, N), dtype=float)
         Float buffer.
     buffer_complex: ndarray(shape=(N, N), dtype=complex)
         Complex buffer.
+
+    Returns
+    -------
+    P : ndarray
+        The output array.
+
+    Notes
+    -----
+    On the main diagonal (``m = 0``), the mean of the diagonal of `W`
+    (``trace(W)/N``) is subtracted from the right-hand side, and the trace of
+    the solution is removed afterwards. With `lap` from
+    ``laplacian(N, bc=True)`` this gives the trace-free solution of the
+    Poisson equation. The same is done for any other operator `lap`.
     """
     N = W.shape[0]
 
@@ -365,19 +561,33 @@ def _solve_cpu_skewh(lap, W, P, buffer_float, buffer_complex):
 @njit(parallel=True, error_model='numpy', fastmath=True)
 def _solve_cpu_generic(lap, W, P, buffer_float, buffer_complex):
     """
+    Solve the tridiagonal system for an arbitrary matrix, in a flat layout.
+
+    Alternative to :func:`_solve_cpu_nonskewh` (not used by default). The
+    arrays are traversed in their flattened form with stride ``N + 1``, so
+    that each of the ``N + 1`` sweeps covers an upper diagonal ``m``
+    followed by the lower diagonal ``m - N`` (the two are decoupled since the
+    coupling coefficient vanishes at the start of a diagonal). This mirrors a
+    grid-stride loop on a GPU. Trace handling on the main diagonal is as in
+    :func:`_solve_cpu_skewh`. Gives wrong results for ``N = 2``.
 
     Parameters
     ----------
-    lap: ndarray(shape=(N**2, 2), dtype=float)
+    lap: ndarray(shape=(N, N, 2), dtype=float)
         Tridiagonal laplacian.
-    W: ndarray(shape=(N**2,), dtype=complex)
-        Input matrix.
-    P: ndarray(shape=(N**2,), dtype=complex)
-        Output matrix.
-    buffer_float: ndarray(shape=(N**2,), dtype=float)
+    W: ndarray(shape=(N, N), dtype=complex)
+        Input matrix (C-contiguous).
+    P: ndarray(shape=(N, N), dtype=complex)
+        Output matrix (overwritten; C-contiguous).
+    buffer_float: ndarray(shape=(N, N), dtype=float)
         Float buffer.
-    buffer_complex: ndarray(shape=(N**2,), dtype=complex)
+    buffer_complex: ndarray(shape=(N, N), dtype=complex)
         Complex buffer.
+
+    Returns
+    -------
+    P : ndarray
+        The output array.
     """
     N = W.shape[-1]
     lap_flat = lap.reshape((N**2, 2))
@@ -459,6 +669,11 @@ def _dot_cpu_m_diag(lap, P_m_diag, W_m_diag,):
     """
     Dot product for tridiagonal operator applied to m diagonal.
 
+    Used by :func:`laplace` for sparse ``dia_matrix`` input. The diagonal
+    ``|m|`` is determined from the length of the input, ``N - |m|``; since
+    the coefficients depend only on ``|m|``, the same call serves the
+    diagonals ``m`` and ``-m``.
+
     Parameters
     ----------
     lap: ndarray(shape(N, N, 2), dtype=float)
@@ -466,7 +681,12 @@ def _dot_cpu_m_diag(lap, P_m_diag, W_m_diag,):
     P_m_diag: ndarray(shape=(N-m,), dtype=complex)
         Input diagonal.
     W_m_diag: ndarray(shape=(N-m,), dtype=complex)
-        Output diagonal.
+        Output diagonal (overwritten).
+
+    Returns
+    -------
+    W_m_diag : ndarray
+        The output array.
     """
     N = lap.shape[-2]
     m = N - W_m_diag.shape[-1]
@@ -493,18 +713,29 @@ def _solve_cpu_m_diag(lap, W_m_diag, P_m_diag):
     """
     Solve Poisson equation for only m diagonal.
 
+    Used by :func:`solve_poisson` for sparse ``dia_matrix`` input. The
+    diagonal ``|m|`` is determined from the length of the input, ``N - |m|``.
+
     Parameters
     ----------
-    lap: ndarray(shape=(N**2, 2), dtype=float)
-        Tridiagonal laplacian.
+    lap: ndarray(shape=(N, N, 2), dtype=float)
+        Tridiagonal laplacian (with ``bc=True`` for the Poisson equation).
     W_m_diag: ndarray(shape=(N-m,), dtype=complex)
         Input diagonal.
     P_m_diag: ndarray(shape=(N-m,), dtype=complex)
-        Output diagonal.
-    buffer_float: ndarray(shape=(N**2,), dtype=float)
-        Float buffer.
-    buffer_complex: ndarray(shape=(N**2,), dtype=complex)
-        Complex buffer.
+        Output diagonal (overwritten).
+
+    Returns
+    -------
+    P_m_diag : ndarray
+        The output array.
+
+    Notes
+    -----
+    For the main diagonal (``m = 0``) the trace of the solution is removed,
+    but, unlike the dense solvers, the trace of the right-hand side is not
+    subtracted first. For input with nonzero trace, the result therefore
+    differs from :func:`_solve_cpu_skewh`.
     """
     N = lap.shape[-2]
     m = N - W_m_diag.shape[-1]
@@ -564,10 +795,19 @@ def select_skewherm(flag):
     """
     Select whether matrices for Laplacian are skew Hermitian.
 
+    In skew-Hermitian mode (the default), the solvers use
+    :func:`_solve_cpu_skewh`, which reads only the upper triangle of the
+    right-hand side. Otherwise :func:`_solve_cpu_nonskewh` is used, which
+    works for arbitrary matrices. The setting is global for this module.
+    It is also set by :func:`quflow.integrators.isospectral.select_skewherm`.
+
+    :func:`laplace` uses a kernel that is correct for arbitrary matrices,
+    and is not changed by this setting.
+
     Parameters
     ----------
     flag: bool
-    gpu_like: bool
+        ``True`` for skew-Hermitian mode, ``False`` for arbitrary matrices.
 
     Returns
     -------
@@ -592,6 +832,23 @@ def select_skewherm(flag):
 
 
 def allocate_buffer(W):
+    """
+    Allocate the work and output buffers for matrices like `W`.
+
+    The buffers (keys ``'complex'``, ``'float'`` and ``'P'``) are stored in
+    ``_cpu_buffer_cache[N]``, replacing earlier ones for the same `N`, and are
+    used by :func:`solve_heat`, :func:`solve_helmholtz`,
+    :func:`solve_globalqg` and :func:`solve_viscdamp`.
+
+    Parameters
+    ----------
+    W : ndarray, shape (N, N), complex
+        Template for shape and dtype (its values are irrelevant).
+
+    Returns
+    -------
+    None
+    """
     global _cpu_buffer_cache
     N = W.shape[0]
 
@@ -605,16 +862,23 @@ def laplacian(N, bc=False, dtype=np.float64):
     """
     Return quantized laplacian (as a tridiagonal laplacian).
 
+    The array is computed by :func:`_compute_cpu_laplacian` and cached; see
+    the module docstring for its layout.
+
     Parameters
     ----------
     N: int
+        Size of the matrices.
     bc: bool (optional)
-        Whether to include boundary conditions.
+        Whether to include boundary conditions, which make the operator on the
+        main diagonal non-singular (used for solving). Default is False.
     dtype: float type
+        Default is ``np.float64``.
 
     Returns
     -------
     lap : ndarray(shape=(N, N, 2), dtype=float)
+        The cached array (shared between calls; do not modify it).
     """
     global _cpu_laplacian_cache
 
@@ -626,16 +890,32 @@ def laplacian(N, bc=False, dtype=np.float64):
 
 
 def laplace(P):
-    """
+    r"""
     Return quantized laplacian applied to stream function `P`.
+
+    Computes :math:`W = \Delta_N P` (see the module docstring). Works for
+    arbitrary (not necessarily skew-Hermitian) matrices.
 
     Parameters
     ----------
-    P: ndarray(shape=(N, N), dtype=complex)
+    P: ndarray(shape=(N, N), dtype=complex) or scipy.sparse.dia_matrix
+        Matrix to apply the Laplacian to. A sparse ``dia_matrix`` is handled
+        diagonal by diagonal. If it has an attribute ``el`` (as set by
+        :func:`quflow.elmr2mat` and :func:`quflow.elmc2mat` for matrices
+        that contain only one wavenumber), the result is simply
+        ``-el*(el+1)*P``.
 
     Returns
     -------
-    W: ndarray(shape=(N, N), dtype=complex)
+    W: ndarray(shape=(N, N), dtype=complex) or scipy.sparse.dia_matrix
+        A new array, of the same kind as `P`.
+
+    Examples
+    --------
+    >>> import quflow as qf
+    >>> T = qf.elmr2mat(2, 1, N=8)
+    >>> bool(abs(qf.laplacian.laplace(T.toarray()) + 6*T.toarray()).max() < 1e-12)
+    True
     """
     N = P.shape[-1]
 
@@ -670,28 +950,79 @@ def laplace(P):
 
 
 def select_first(W):
+    """
+    Return the first matrix ``W[0, ..., 0, :, :]`` of a stack, as a contiguous array.
+
+    Default `reduce` function of :func:`solve_poisson`.
+
+    Parameters
+    ----------
+    W : ndarray, shape (..., N, N)
+
+    Returns
+    -------
+    ndarray, shape (N, N)
+    """
     zeroind = (0,)*(W.ndim-2) + (Ellipsis,)
     return np.ascontiguousarray(W[zeroind])
 
 
 def select_sum(W):
+    """
+    Return the sum of the matrices in a stack.
+
+    Alternative `reduce` function for :func:`solve_poisson`.
+
+    Parameters
+    ----------
+    W : ndarray, shape (..., N, N)
+
+    Returns
+    -------
+    ndarray, shape (N, N)
+    """
     return W.sum(axis=tuple(range(W.ndim-2)))
 
 
 def solve_poisson(W, reduce=select_first):
-    """
+    r"""
     Solve the Poisson equation
-        ΔP = W
+    :math:`\Delta_N P = W`,
     i.e. return the stream matrix `P` for `W`.
+
+    The trace of `W` (its :math:`\ell = 0` component, which lies outside the
+    range of :math:`\Delta_N`) is ignored: the result is the unique trace-free
+    `P` with :math:`\Delta_N P = W - \tfrac{\operatorname{tr} W}{N} I`.
+    The cost is :math:`O(N^2)`.
 
     Parameters
     ----------
-    W: ndarray(shape=(N, N) or (k, N, N), dtype=complex)
+    W: ndarray(shape=(N, N) or (k, N, N), dtype=complex) or scipy.sparse.dia_matrix
+        Vorticity matrix. In skew-Hermitian mode (the default, see
+        :func:`select_skewherm`) it must be skew-Hermitian, and only its upper
+        triangle is read. A stack of matrices is first reduced to one matrix
+        by `reduce`. For a sparse ``dia_matrix``, see :func:`laplace`; the
+        sparse path does not subtract the trace of `W` first, so for sparse
+        input with nonzero trace the result differs from the dense one.
     reduce: callable(W)
+        Function reducing a stack of matrices to one matrix. Default is
+        :func:`select_first` (use the first matrix); see also :func:`select_sum`.
 
     Returns
     -------
     P: ndarray(shape=(N, N), dtype=complex)
+        Stream matrix. For dense input, this is an internal buffer (one per
+        shape and dtype) that is overwritten by the next call with the same
+        shape and dtype. Copy it if it must be kept.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import quflow as qf
+    >>> W = qf.shr2mat(np.random.default_rng(0).standard_normal(64), N=8)
+    >>> P = qf.solve_poisson(W).copy()
+    >>> bool(abs(qf.laplacian.laplace(P) - (W - np.trace(W)/8*np.eye(8))).max() < 1e-12)
+    True
     """
     if W.ndim >= 3:
         W = reduce(W)
@@ -735,21 +1066,38 @@ def solve_poisson(W, reduce=select_first):
 
 
 def solve_heat(h_times_nu, W0):
-    """
+    r"""
     Solve heat equation
-        W' =  ν Δ W,  W(0) = W0
+    :math:`\dot W = \nu \Delta_N W`, :math:`W(0) = W_0`,
     using one step of backward Euler method, i.e.,
-        ( 1 - h ν Δ ) W = W0
+    :math:`(1 - h \nu \Delta_N) W_h = W_0`.
 
     Parameters
     ----------
     h_times_nu: float
         Stepsize (in qtime) times viscosity ν.
     W0: ndarray(shape=(N, N), dtype=complex)
+        Initial matrix (not modified). In skew-Hermitian mode (the default)
+        only its upper triangle is read.
 
     Returns
     -------
     Wh: ndarray(shape=(N, N), dtype=complex)
+        Solution after one step. The result is an internal buffer, shared by :func:`solve_heat`,
+    :func:`solve_helmholtz`, :func:`solve_globalqg` and :func:`solve_viscdamp`
+    for each `N`: it is overwritten by the next call to any of them. Copy it
+    if it must be kept.
+
+    Notes
+    -----
+    The solver removes the trace (the :math:`\ell = 0` component) of the
+    right-hand side and of the solution (see :func:`_solve_cpu_skewh`), so the
+    result is trace-free even if `W0` is not.
+
+    The operator and the output buffer are cached per `N` and parameter
+    values, but not per dtype: after a first call with single precision
+    input, later calls with double precision input are computed in single
+    precision (and vice versa).
     """
     global _cpu_heat_cache
 
@@ -782,18 +1130,36 @@ def solve_heat(h_times_nu, W0):
 
 
 def solve_helmholtz(W, alpha=1.0):
-    """
+    r"""
     Solve the inhomogeneous Helmholtz equation
-        ( 1 - alpha * Δ ) P = W
+    :math:`(1 - \alpha \Delta_N) P = W`.
 
     Parameters
     ----------
     alpha: float
+        Coefficient :math:`\alpha`. Default is 1.0.
     W: ndarray(shape=(N, N), dtype=complex)
+        Right-hand side (not modified). In skew-Hermitian mode (the default)
+        only its upper triangle is read.
 
     Returns
     -------
     P: ndarray(shape=(N, N), dtype=complex)
+        Solution. The result is an internal buffer, shared by :func:`solve_heat`,
+    :func:`solve_helmholtz`, :func:`solve_globalqg` and :func:`solve_viscdamp`
+    for each `N`: it is overwritten by the next call to any of them. Copy it
+    if it must be kept.
+
+    Notes
+    -----
+    The solver removes the trace (the :math:`\ell = 0` component) of the
+    right-hand side and of the solution (see :func:`_solve_cpu_skewh`), so the
+    result is trace-free even if `W` is not.
+
+    The operator and the output buffer are cached per `N` and parameter
+    values, but not per dtype: after a first call with single precision
+    input, later calls with double precision input are computed in single
+    precision (and vice versa).
     """
     global _cpu_helmholtz_cache
 
@@ -827,18 +1193,48 @@ def solve_helmholtz(W, alpha=1.0):
 
 
 def solve_globalqg(W, gamma=1.0):
-    """
+    r"""
     Solve the inhomogeneous Helmholtz equation
-        ΔP + gamma * Z @ P @ Z = W
+    of the global quasi-geostrophic model for the stream matrix.
+
+    The equation solved is
+
+    .. math::
+
+        \Delta_N P + \frac{\gamma}{2}\big(Z^2 P + P Z^2\big) = W,
+
+    where :math:`Z = X_3` is the third matrix of
+    :func:`quflow.geometry.cartesian_generators` (the quantization of the
+    coordinate function :math:`x_3`). Since :math:`Z` is diagonal, the
+    operator keeps the tridiagonal structure.
 
     Parameters
     ----------
     gamma: float
+        Coefficient :math:`\gamma`. Default is 1.0.
     W: ndarray(shape=(N, N), dtype=complex)
+        Right-hand side (not modified). In skew-Hermitian mode (the default)
+        only its upper triangle is read.
 
     Returns
     -------
     P: ndarray(shape=(N, N), dtype=complex)
+        Solution. The result is an internal buffer, shared by :func:`solve_heat`,
+    :func:`solve_helmholtz`, :func:`solve_globalqg` and :func:`solve_viscdamp`
+    for each `N`: it is overwritten by the next call to any of them. Copy it
+    if it must be kept.
+
+    Notes
+    -----
+    The solver removes the trace of the right-hand side and of the solution
+    (see :func:`_solve_cpu_skewh`). Since this operator is not singular on
+    the main diagonal, the returned `P` does not satisfy the equation on
+    the diagonal; the off-diagonal entries are exact.
+
+    The operator and the output buffer are cached per `N` and parameter
+    values, but not per dtype: after a first call with single precision
+    input, later calls with double precision input are computed in single
+    precision (and vice versa).
     """
     global _cpu_globalqg_cache
 
@@ -878,29 +1274,54 @@ def solve_globalqg(W, gamma=1.0):
 
 
 def solve_viscdamp(h, W0, nu=1e-4, alpha=0.01, force=None, theta=1):
-    """
+    r"""
     Solve quantized viscosity and damping equation
-        W' - nu * ∆ W + alpha * W = F
-    for one time-step using the theta scheme.
+    :math:`\dot W - \nu \Delta_N W + \alpha W = F`
+    for one time-step using the theta scheme:
+
+    .. math::
+
+        (1 + h\alpha\theta) W_h - h\nu\theta\,\Delta_N W_h
+        = (1 - h\alpha(1-\theta)) W_0 + h\nu(1-\theta)\,\Delta_N W_0 + hF.
 
     Parameters
     ----------
     h: float
         Time-step.
     W0: ndarray(shape=(N, N), dtype=complex)
-        Initial vorticity matrix.
+        Initial vorticity matrix (not modified).
     nu: float
-        Viscosity.
+        Viscosity. Default is 1e-4.
     alpha: float
-        Damping.
+        Damping. Default is 0.01.
     force: None or ndarray(shape=(N, N), dtype=complex)
         External forcing F applied.
     theta: float
-        Weighting in the theta method (Crank-Nicolson for theta=0.5).
+        Weighting in the theta method (Crank-Nicolson for theta=0.5,
+        backward Euler for theta=1, the default).
 
     Returns
     -------
     Wh: ndarray(shape=(N, N), dtype=complex)
+        Solution after one step. The result is an internal buffer, shared by :func:`solve_heat`,
+    :func:`solve_helmholtz`, :func:`solve_globalqg` and :func:`solve_viscdamp`
+    for each `N`: it is overwritten by the next call to any of them. Copy it
+    if it must be kept.
+
+    Notes
+    -----
+    The solver removes the trace (the :math:`\ell = 0` component) of the
+    right-hand side and of the solution (see :func:`_solve_cpu_skewh`), so the
+    result is trace-free even if `W0` is not.
+
+    The operator is cached per ``(N, h, nu, alpha)``, without `theta`: a
+    call with a different `theta` but the same other parameters reuses the
+    operator of the earlier `theta`, which gives wrong results.
+
+    The operator and the output buffer are cached per `N` and parameter
+    values, but not per dtype: after a first call with single precision
+    input, later calls with double precision input are computed in single
+    precision (and vice versa).
     """
     global _cpu_viscdamp_cache
 
