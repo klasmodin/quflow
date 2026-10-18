@@ -126,8 +126,28 @@ def commutator_skewherm(W, P):
     return VF
 
 
-# Select default commutator
-commutator = commutator_skewherm
+def commutator(W, P):
+    """
+    Matrix commutator ``[W, P] = W@P - P@W``, following :func:`select_skewherm`.
+
+    Dispatches to :func:`commutator_skewherm` in skew-Hermitian mode (the
+    default) and to :func:`commutator_generic` otherwise. Since the choice is
+    made at each call, modules that import ``commutator`` by name also follow
+    the current setting.
+
+    Parameters
+    ----------
+    W : ndarray, shape (N, N)
+    P : ndarray, shape (N, N)
+
+    Returns
+    -------
+    ndarray, shape (N, N)
+        The commutator ``W@P - P@W`` (a new array).
+    """
+    if _SKEW_HERM_:
+        return commutator_skewherm(W, P)
+    return commutator_generic(W, P)
 
 
 # Project to skewherm (to avoid drift)
@@ -219,8 +239,8 @@ def select_skewherm(flag):
 
     Skew-Hermitian mode (the default) allows faster computations, but gives
     wrong results for matrices that are not skew-Hermitian. The setting is
-    global: it sets this module's ``commutator`` and calls
-    :func:`quflow.laplacian.select_skewherm` with the same flag.
+    global: it applies to the integrators and :func:`commutator` of this
+    module, and calls :func:`quflow.laplacian.select_skewherm` with the same flag.
 
     Parameters
     ----------
@@ -230,21 +250,9 @@ def select_skewherm(flag):
     Returns
     -------
     None
-
-    Notes
-    -----
-    Other modules that imported ``commutator`` by name (e.g.
-    ``quflow.integrators.commutator``) keep the function bound at import
-    time and are not affected by this call.
     """
     global _SKEW_HERM_
-    global commutator
-    if flag:
-        commutator = commutator_skewherm
-        _SKEW_HERM_ = True
-    else:
-        commutator = commutator_generic
-        _SKEW_HERM_ = False
+    _SKEW_HERM_ = bool(flag)
     select_skewherm_laplacian(flag)
 
 
@@ -353,19 +361,19 @@ def isomp_quasinewton(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None,
 
     Notes
     -----
-    Assumes skew-Hermitian `W` and stream matrices (see :func:`select_skewherm`).
-    `forcing` is not implemented. Passing a forcing function is meant to raise
-    an error, but it is currently ignored without warning.
+    Requires skew-Hermitian `W` and stream matrices: raises
+    `NotImplementedError` if skew-Hermitian mode is switched off
+    (see :func:`select_skewherm`), and if `forcing` is given.
 
     See Also
     --------
     isomp_fixedpoint : Default isospectral integrator with more features.
     """
     if forcing is not None:
-        assert NotImplementedError("Forcing for isomp_quasinewton is not implemented yet.")
+        raise NotImplementedError("Forcing for isomp_quasinewton is not implemented yet.")
 
     if not _SKEW_HERM_:
-        assert NotImplementedError("isomp_quasinewton might not work for non-skewherm.")
+        raise NotImplementedError("isomp_quasinewton requires skew-Hermitian mode (see select_skewherm).")
 
     stepsize = dt / hbar(N=W.shape[-1])
 
@@ -481,8 +489,8 @@ def isomp_simple(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None, **kw
     factorization of :math:`A` is used for both linear solves; otherwise two
     general solves are used.
 
-    `forcing` is not implemented. Passing a forcing function is meant to raise
-    an error, but it is currently ignored without warning.
+    `forcing` is not implemented: passing a forcing function raises
+    `NotImplementedError`.
 
     See Also
     --------
@@ -495,7 +503,7 @@ def isomp_simple(W, dt, steps=100, hamiltonian=solve_poisson, forcing=None, **kw
     stepsize = dt/hbar(W.shape[-1])
 
     if forcing is not None:
-        assert NotImplementedError("Forcing for isomp_simple is not implemented yet.")
+        raise NotImplementedError("Forcing for isomp_simple is not implemented yet.")
 
     for k in range(steps):
 
@@ -612,9 +620,7 @@ def isomp_fixedpoint(W,
     hamiltonian : callable, optional
         Function ``hamiltonian(W)`` or ``hamiltonian(W, time)`` returning the
         stream matrix. Default is :func:`quflow.laplacian.solve_poisson`.
-        The returned array is scaled in place, so its values must be
-        recomputed at every call (returning stored values without
-        recomputing them gives wrong results).
+        The returned array is not modified.
     time : float or None, optional
         Time at the initial state. If `None` (default) the system is assumed to
         be autonomous, and the time parameter is not passed to the hamiltonian and forcing.
@@ -626,10 +632,9 @@ def isomp_fixedpoint(W,
         Extra force function ``forcing(P, W)`` or ``forcing(P, W, time)``
         returning a matrix of the same shape as `W` (to allow non-isospectral
         perturbations). It is evaluated at the midpoint, with the unscaled
-        stream matrix. The returned array is scaled in place, so its values
-        must be recomputed at every call; returning stored values (for
-        example, a force cached per time step) gives wrong results.
-        Not supported together with `compsum`.
+        stream matrix. The returned array is not modified, so the function
+        may return a stored array (for example, a force cached per time step).
+        Not supported together with `compsum` (raises `NotImplementedError`).
     strang_splitting : callable or None, optional
         Function ``strang_splitting(t, W)`` returning the state after
         advancing `W` by time `t` with another flow. It is applied with
@@ -638,8 +643,6 @@ def isomp_fixedpoint(W,
         Dictionary to be filled in with integration statistics: ``'iterations'``
         (average number of iterations per step), ``'number_of_maxit'`` (fraction
         of steps that reached `maxit`) and, if `tol` is automatic, ``'tol_auto'``.
-        Note that an empty dict is not filled in; pass for example
-        ``{'iterations': 0.0}``.
     callback : callable or None, optional
         Function ``callback(W, dW)`` evaluated at the end of every step,
         just before W is updated W += dW. Here ``dW`` is the isospectral part
@@ -702,6 +705,8 @@ def isomp_fixedpoint(W,
     # Check input
     assert minit >= 1, "minit must be at least 1."
     assert maxit >= minit, "maxit must be at minit."
+    if compsum and forcing is not None:
+        raise NotImplementedError("Compensated sum with forcing is not yet implemented.")
 
     # Check if force function is autonomous
     if forcing is not None:
@@ -719,7 +724,7 @@ def isomp_fixedpoint(W,
     autonomous = True
     if time is not None:
         try:
-            Phalf = hamiltonian(W, time=time)
+            hamiltonian(W, time=time)
         except TypeError:
             pass
         else:
@@ -734,6 +739,7 @@ def isomp_fixedpoint(W,
     dW_old = np.zeros_like(W)
     Whalf = np.zeros_like(W)
     PWcomm = np.zeros_like(W)
+    Phalf = None  # Scaled stream matrix (own buffer, allocated at first use)
     # PWPhalf = np.zeros_like(W)
     # dthalf = dt/2.0
     hb = hbar(N=W.shape[-1])
@@ -751,7 +757,7 @@ def isomp_fixedpoint(W,
             tol = (mach_eps*dt/hb)*np.linalg.norm(W, np.inf)
         if verbatim:
             print("Tolerance set to {}.".format(tol))
-        if stats:
+        if stats is not None:
             stats['tol_auto'] = tol
 
     # Variables for compensated summation
@@ -789,10 +795,14 @@ def isomp_fixedpoint(W,
 
             # Update Ptilde
             if autonomous:
-                Phalf = hamiltonian(Whalf)
+                P = hamiltonian(Whalf)
             else:
-                Phalf = hamiltonian(Whalf, time=time + dt/2)
-            Phalf *= vareps
+                P = hamiltonian(Whalf, time=time + dt/2)
+
+            # Scale into own buffer (the array returned by the hamiltonian is not modified)
+            if Phalf is None or Phalf.shape != P.shape:
+                Phalf = np.empty_like(P)
+            np.multiply(P, vareps, out=Phalf)
 
             # Compute middle variables
             # PWcomm = Phalf @ Whalf  # old
@@ -813,13 +823,13 @@ def isomp_fixedpoint(W,
 
             # Add forcing if needed
             if forcing:
-                # Compute forcing if needed
-                Phalf /= vareps
+                # Compute forcing if needed (scaled into own buffer FW,
+                # so the array returned by the forcing is not modified)
                 if autonomous_force:
-                    FW = forcing(Phalf, Whalf)
+                    F = forcing(P, Whalf)
                 else:
-                    FW = forcing(Phalf, Whalf, time=time + dt/2)
-                FW *= dt/2
+                    F = forcing(P, Whalf, time=time + dt/2)
+                np.multiply(F, dt/2, out=FW)
                 dW += FW
 
             # Check if time to break
@@ -888,9 +898,6 @@ def isomp_fixedpoint(W,
             # 4.
             np.copyto(W, t_compsum)
 
-            if forcing:
-                raise NotImplementedError("Compensated sum with forcing is not yet implemented.")
-
         else:
             W += PWcomm   
 
@@ -909,7 +916,7 @@ def isomp_fixedpoint(W,
 
     if verbatim:
         print("Average number of iterations per step: {:.2f}".format(total_iterations/steps))
-    if stats:
+    if stats is not None:
         stats["iterations"] = total_iterations/steps
         stats["number_of_maxit"] = number_of_maxit/steps
 
