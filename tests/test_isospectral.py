@@ -2,7 +2,6 @@
 import numpy as np
 import pytest
 import quflow as qf
-import quflow.physics
 import quflow.integrators.erk
 from quflow.integrators import isospectral
 
@@ -111,7 +110,7 @@ def test_commutator_follows_select_skewherm(random_skewh, rng, nonskewh_mode):
     # All references to `commutator` must follow the global setting,
     # also those imported by name in other modules.
     for comm in [isospectral.commutator, qf.integrators.commutator,
-                 quflow.physics.commutator, quflow.integrators.erk.commutator]:
+                 quflow.integrators.erk.commutator]:
         np.testing.assert_allclose(comm(A, B), expected, rtol=0, atol=1e-12)
 
 

@@ -18,8 +18,7 @@ Both are conserved by the quantized Euler equations.
 import numpy as np
 
 from .laplacian import solve_poisson, laplace
-from .geometry import norm_Linf, norm_L2, inner_L2
-from .integrators import commutator
+from .geometry import norm_Linf, norm_L2, inner_L2, bracket
 
 # Define inner products
 
@@ -135,25 +134,25 @@ def sectional_curvature(F, G):
     r"""
     Sectional curvature term for the quantized Euler equations.
 
-    With :math:`[\cdot,\cdot]` the matrix commutator (without
-    :math:`1/\hbar`, see :func:`quflow.integrators.isospectral.commutator`),
-    :math:`\langle\cdot,\cdot\rangle` the :math:`L^2` inner product and
-    :math:`A = [\Delta_N F, G] + [\Delta_N G, F]`, computes
+    With :math:`\{A, B\} = \frac{1}{\hbar}[A, B]` the quantized Poisson
+    bracket (:func:`quflow.geometry.bracket`),
+    :math:`\langle\cdot,\cdot\rangle` the :math:`L^2` inner product
+    (:func:`quflow.geometry.inner_L2`) and
+    :math:`A = \{\Delta_N F, G\} + \{\Delta_N G, F\}`, computes
 
     .. math::
 
         C = -\tfrac14\langle A, \Delta_N^{-1} A\rangle
-            - \tfrac12\langle [F, G], [\Delta_N F, G] - [\Delta_N G, F]\rangle
-            + \tfrac34\langle [F, G], \Delta_N [F, G]\rangle
-            + \langle [\Delta_N F, F], \Delta_N^{-1}[\Delta_N G, G]\rangle.
+            - \tfrac12\langle \{F, G\}, \{\Delta_N F, G\} - \{\Delta_N G, F\}\rangle
+            + \tfrac34\langle \{F, G\}, \Delta_N \{F, G\}\rangle
+            + \langle \{\Delta_N F, F\}, \Delta_N^{-1}\{\Delta_N G, G\}\rangle.
 
     This is the sectional curvature :math:`C_N(F, G)` of Zeitlin's model
-    from [1]_, up to the constant factor :math:`\hbar^2/(4\pi)`: the paper
-    uses the bracket :math:`\frac{1}{\hbar}[\cdot,\cdot]` and the inner
-    product :math:`\frac{4\pi}{N}\operatorname{tr}(A^* B)`, whereas this
-    function uses the plain commutator and
-    :func:`quflow.geometry.inner_L2`. As in the paper's formula, the result is
-    not divided by :math:`\|F\|^2\|G\|^2 - \langle F, G\rangle^2`.
+    from [1]_, up to the constant factor :math:`1/(4\pi)`, since the paper
+    uses the inner product :math:`\frac{4\pi}{N}\operatorname{tr}(A^* B)`
+    instead of :func:`quflow.geometry.inner_L2`. As in the paper's formula,
+    the result is not divided by
+    :math:`\|F\|^2\|G\|^2 - \langle F, G\rangle^2`.
 
     Parameters
     ----------
@@ -171,11 +170,11 @@ def sectional_curvature(F, G):
     """
     DeltaF = laplace(F)
     DeltaG = laplace(G)
-    FGcomm = commutator(F, G) 
-    DeltaFGcomm = commutator(DeltaF, G)
-    DeltaGFcomm = commutator(DeltaG, F)
-    DeltaFFcomm = commutator(DeltaF, F)
-    DeltaGGcomm = commutator(DeltaG, G)
+    FGcomm = bracket(F, G) 
+    DeltaFGcomm = bracket(DeltaF, G)
+    DeltaGFcomm = bracket(DeltaG, F)
+    DeltaFFcomm = bracket(DeltaF, F)
+    DeltaGGcomm = bracket(DeltaG, G)
 
     C = -inner_L2(DeltaFGcomm + DeltaGFcomm, solve_poisson(DeltaFGcomm + DeltaGFcomm))/4.0
 

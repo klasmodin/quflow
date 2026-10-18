@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from scipy.sparse import dia_matrix
 import quflow as qf
 
 
@@ -235,7 +236,6 @@ def test_inner_L2_sparse_same_offsets():
     assert abs(qf.geometry.inner_L2(A, B) - qf.geometry.inner_L2(A.toarray(), B.toarray())) < 1e-13
 
 
-@pytest.mark.xfail(strict=True, reason="inner_L2 uses `*`, which is the matrix product for scipy sparse matrices")
 def test_inner_L2_sparse_and_dense():
     N = 7
     A = qf.elmr2mat(3, 2, N)
@@ -257,3 +257,39 @@ def test_energy_and_enstrophy_identities(random_shr):
     np.testing.assert_allclose(qf.physics.enstrophy(W), 0.5*np.sum(omega**2), rtol=1e-12)
     # The trace does not contribute to the energy
     np.testing.assert_allclose(qf.physics.energy_euler(W + 1j*np.eye(N)), E, rtol=1e-12)
+
+
+def _random_dia(rng, offsets, N):
+    """dia_matrix with random data, including nonzero storage outside the matrix."""
+    data = rng.standard_normal((len(offsets), N)) + 1j*rng.standard_normal((len(offsets), N))
+    return dia_matrix((data, offsets), shape=(N, N))
+
+
+@pytest.mark.parametrize("offsets_P, offsets_W", [([-2, 0, 1], [-2, 0, 1]), ([-2, 0, 1], [-1, 3]), ([0], [2])])
+def test_inner_L2_sparse_general(offsets_P, offsets_W, rng):
+    N = 7
+    P, W = _random_dia(rng, offsets_P, N), _random_dia(rng, offsets_W, N)
+    Pd, Wd = P.toarray(), W.toarray()
+    expected = qf.geometry.inner_L2(Pd, Wd)
+    assert abs(qf.geometry.inner_L2(P, W) - expected) < 1e-12
+    assert abs(qf.geometry.inner_L2(P, Wd) - expected) < 1e-12
+    assert abs(qf.geometry.inner_L2(Pd, W) - expected) < 1e-12
+    assert abs(qf.geometry.norm_L2(P) - qf.geometry.norm_L2(Pd)) < 1e-12
+
+
+def test_sectional_curvature_uses_bracket(random_shr):
+    # Each term contains two brackets [.,.]/hbar, so the result is the
+    # commutator version divided by hbar**2
+    N = 8
+    F, G = qf.shr2mat(random_shr(N)), qf.shr2mat(random_shr(N))
+    lap, sp = qf.laplacian.laplace, qf.solve_poisson
+    c = lambda A, B: A@B - B@A
+    ip = qf.geometry.inner_L2
+    DF, DG = lap(F), lap(G)
+    A = c(DF, G) + c(DG, F)
+    C_comm = (-ip(A, sp(A).copy())/4 - ip(c(F, G), c(DF, G) - c(DG, F))/2
+              + 3*ip(c(F, G), lap(c(F, G)))/4 + ip(c(DF, F), sp(c(DG, G)).copy()))
+    C = qf.physics.sectional_curvature(F, G)
+    np.testing.assert_allclose(C, C_comm/qf.hbar(N)**2, rtol=1e-12)
+    # Symmetric in F and G
+    np.testing.assert_allclose(qf.physics.sectional_curvature(G, F), C, rtol=1e-12)

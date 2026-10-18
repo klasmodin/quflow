@@ -23,7 +23,7 @@ returned by :func:`quflow.elmr2mat`.
 import numpy as np
 from numba import njit
 from scipy.linalg import expm
-from scipy.sparse import isspmatrix_dia, dia_matrix
+from scipy.sparse import isspmatrix_dia, dia_matrix, issparse
 
 
 @njit(error_model='numpy', fastmath=True)
@@ -144,15 +144,14 @@ def norm_L2(W):
     Parameters
     ----------
     W, array
-        Matrix of shape (N, N), or a ``dia_matrix`` (whose storage must be
-        zero outside the matrix, as for matrices from :func:`quflow.elmr2mat`).
+        Matrix of shape (N, N), dense or scipy sparse.
 
     Returns
     -------
     float
     """
-    if isspmatrix_dia(W):
-        return np.sqrt((W.data*W.data.conj()).sum().real/W.shape[-1])
+    if issparse(W):
+        return np.sqrt(inner_L2(W, W))
     sqN = np.sqrt(W.shape[-1])
     return np.linalg.norm(W, ord='fro')/sqN
 
@@ -168,19 +167,20 @@ def inner_L2(P, W):
 
     Parameters
     ----------
-    P, W : ndarray, shape (N, N), or scipy.sparse.dia_matrix
-        Both dense, or both ``dia_matrix`` with the same diagonal offsets
-        (and zero storage outside the matrix, as for matrices from
-        :func:`quflow.elmr2mat`). Other combinations of sparse input give
-        wrong results, since ``*`` is the matrix product for sparse matrices.
+    P, W : ndarray, shape (N, N), or scipy sparse matrix
+        Dense or sparse (e.g. ``dia_matrix`` from :func:`quflow.elmr2mat`),
+        in any combination.
 
     Returns
     -------
     float
     """
     N = W.shape[-1]
-    if isspmatrix_dia(P) and isspmatrix_dia(W) and np.array_equal(W.offsets, P.offsets):
-        return (P.data*W.data.conj()).sum().real/N
+    if issparse(P):
+        # Elementwise product (for sparse matrices `*` is the matrix product)
+        return np.real(P.multiply(W.conj()).sum())/N
+    if issparse(W):
+        return np.real(W.conj().multiply(P).sum())/N
     return (P*W.conj()).sum().real/N
 
 
