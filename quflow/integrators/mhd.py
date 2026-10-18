@@ -14,15 +14,21 @@ where :math:`(P, B)` is returned by a Hamiltonian function of the state; for
 standard MHD (:func:`solve_mhd`), :math:`\Delta_N P = W` and
 :math:`B = \Delta_N \Theta`.
 
-The default integrator :func:`magmp_fixedpoint` (alias ``magmp``) is a
-second order midpoint method, analogous to the isospectral midpoint method of
-:mod:`quflow.integrators.isospectral`. In numerical tests it conserves the
-spectrum of :math:`\Theta` and the quantities
-:math:`\operatorname{tr}(W\Theta^k)` up to rounding errors (and the
-iteration tolerance).
+The default integrator :func:`magmp_fixedpoint` (alias ``magmp``) is the
+second order magnetic midpoint method of [1]_, a Lie-Poisson integrator
+analogous to the isospectral midpoint method of
+:mod:`quflow.integrators.isospectral`. It conserves the Casimirs of the
+system: the spectrum of :math:`\Theta` and the quantities
+:math:`\operatorname{tr}(W\Theta^k)`, up to rounding errors and the
+tolerance of the fixed-point iteration.
 
 Both integrators require skew-Hermitian mode (see
 :func:`quflow.integrators.isospectral.select_skewherm`).
+
+References
+----------
+.. [1] K. Modin and M. Roop. *Spatio-temporal Lie-Poisson discretization for
+   incompressible magnetohydrodynamics on the sphere*, IMA J. Numer. Anal., 2025.
 """
 import numpy as np
 import scipy.linalg
@@ -339,9 +345,11 @@ def magmp_fixedpoint(W,
         \qquad
         \Theta_{n+1} = \Theta_n + h[\tilde P, \tilde\Theta].
 
-    For :math:`\Theta` this is the isospectral midpoint method (see
-    :mod:`quflow.integrators.isospectral`), so the spectrum of :math:`\Theta`
-    is preserved. The forcing, if given, enters as in
+    This is the magnetic midpoint method of Modin and Roop (IMA J. Numer.
+    Anal., 2025). It conserves the spectrum of :math:`\Theta` (for
+    :math:`\Theta` it is the isospectral midpoint method of
+    :mod:`quflow.integrators.isospectral`) and the quantities
+    :math:`\operatorname{tr}(W\Theta^k)`. The forcing, if given, enters as in
     :func:`quflow.integrators.isospectral.isomp_fixedpoint`.
 
     Parameters
