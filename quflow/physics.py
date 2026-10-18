@@ -147,6 +147,14 @@ def sectional_curvature(F, G):
             + \tfrac34\langle [F, G], \Delta_N [F, G]\rangle
             + \langle [\Delta_N F, F], \Delta_N^{-1}[\Delta_N G, G]\rangle.
 
+    This is the sectional curvature :math:`C_N(F, G)` of Zeitlin's model
+    from [1]_, up to the constant factor :math:`\hbar^2/(4\pi)`: the paper
+    uses the bracket :math:`\frac{1}{\hbar}[\cdot,\cdot]` and the inner
+    product :math:`\frac{4\pi}{N}\operatorname{tr}(A^* B)`, whereas this
+    function uses the plain commutator and
+    :func:`quflow.geometry.inner_L2`. As in the paper's formula, the result is
+    not divided by :math:`\|F\|^2\|G\|^2 - \langle F, G\rangle^2`.
+
     Parameters
     ----------
     F, G : ndarray, shape (N, N), complex
@@ -155,6 +163,11 @@ def sectional_curvature(F, G):
     Returns
     -------
     float
+
+    References
+    ----------
+    .. [1] K. Modin and M. Perrot. *Eulerian and Lagrangian stability in
+       Zeitlin's model of hydrodynamics*, Comm. Math. Phys., 2024.
     """
     DeltaF = laplace(F)
     DeltaG = laplace(G)
