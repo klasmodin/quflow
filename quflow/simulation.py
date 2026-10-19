@@ -16,8 +16,8 @@ Typical use::
     sim['dt'] = 0.1*qf.hbar(N)
     sim['simtime'] = 10.0
     sim['dt_out'] = 0.5
-    qf.solve(sim)
-    sim['fun', -1]   # last state as function values
+    W = qf.solve(sim)  # final state
+    sim['fun', -1]     # last state as function values
 """
 import numpy as np
 import os
@@ -167,7 +167,7 @@ class QuSimulation(object):
     >>> sim['dt'] = 0.1*qf.hbar(N)
     >>> sim['steps'] = 10
     >>> sim['dt_out'] = 0.5*qf.hbar(N)
-    >>> qf.solve(sim, progress_bar=False)
+    >>> W = qf.solve(sim, progress_bar=False)
     >>> sim['time'].shape, sim['fun'].shape
     ((3,), (3, 8, 15))
     """
@@ -460,13 +460,6 @@ class QuSimulation(object):
         ------
         (varname, arr, qutype) : tuple
             Dataset name, converted data and qutype.
-
-        Notes
-        -----
-        A complex function output (``'fun'`` with a complex dtype) is only
-        computed correctly if ``'shc'`` comes before it in `qutypes`;
-        otherwise real coefficients (:func:`quflow.mat2shr`) are transformed
-        as complex ones.
         """
         N = W.shape[-1]
         if qutype2varname is None:
@@ -509,7 +502,7 @@ class QuSimulation(object):
                     except NameError:
                         omegac = []
                         for Wi in W.reshape((-1, N, N)):
-                            omegac.append(mat2shr(Wi))
+                            omegac.append(mat2shc(Wi))
                         omegac = np.squeeze(np.array(omegac))
                         omega = omegac
                 arr = []
@@ -552,14 +545,14 @@ class QuSimulation(object):
             Initial time. Default is 0.0.
         **kwargs
             Extra fields and their initial values, which must be scalars or
-            numpy arrays. Values of other types are not rejected, but give
-            wrong data. The fields ``'tol_auto'``, ``'iterations'`` and
+            numpy arrays. The fields ``'tol_auto'``, ``'iterations'`` and
             ``'number_of_maxit'`` are always created (initially 0.0).
 
         Raises
         ------
         ValueError
-            If an extra field is named ``'time'`` or ``'step'``.
+            If an extra field is named ``'time'`` or ``'step'``, or if an
+            extra field or a logger value is not a scalar or numpy array.
         """
         try:
             f = self._open("r+")
@@ -605,7 +598,7 @@ class QuSimulation(object):
                 elif isinstance(value, np.ndarray):
                     arr = value
                 else:
-                    ValueError("Data {} is not a scalar or a numpy array.".format(value))
+                    raise ValueError("Data {} is not a scalar or a numpy array.".format(value))
                 varset = f.create_dataset(self.datapath + name, (1,) + arr.shape,
                                           dtype=arr.dtype,
                                           maxshape=(None,) + arr.shape
@@ -626,7 +619,7 @@ class QuSimulation(object):
                 elif isinstance(value, np.ndarray):
                     arr = value
                 else:
-                    ValueError("Data {} is not a scalar or a numpy array.".format(value))
+                    raise ValueError("Data {} is not a scalar or a numpy array.".format(value))
                 varset = f.create_dataset(self.datapath + name, (1,) + arr.shape,
                                           dtype=arr.dtype,
                                           maxshape=(None,) + arr.shape
@@ -722,9 +715,9 @@ def create_runfile(sim, runfilename: str = None):
 
     Notes
     -----
-    In the generated script, the default value of ``--filename`` is the
-    file name without quotes, so the script fails with a `NameError` when
-    run; and the GPU branch refers to an undefined name ``complex_type``.
+    The default value of ``--filename`` is the base name of the simulation
+    file, so without that option the script must be run in the directory of
+    the file.
     """
     if not isinstance(sim, QuSimulation):
         if isinstance(sim, str):
@@ -751,7 +744,7 @@ else:
     print("Running on CPU")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-f", "--filename", help="HDF5 simfile", type=str, default={}) 
+parser.add_argument("-f", "--filename", help="HDF5 simfile", type=str, default={!r}) 
 parser.add_argument("-a", "--animate", help="Only create animation.", action="store_true")
 parser.add_argument("-s", "--simulate", help="Only simulate.", action="store_true")
 parser.add_argument("-t", "--simtime", help="Total simulation time.", type=float)
@@ -788,7 +781,7 @@ if cuda_available and mysim['hamiltonian'] is qf.solve_poisson and mysim['integr
     W0 = mysim['mat', 0] 
     N = W0.shape[-1]
     isomp = IsompCUDA(N, dtype=W0.dtype)
-    solve_poisson = DiagTriDiagOp(N, dtype=np.dtype(complex_type))
+    solve_poisson = DiagTriDiagOp(N, dtype=W0.dtype)
 
     solve_kwargs['hamiltonian'] = solve_poisson
     solve_kwargs['integrator'] = isomp
@@ -802,9 +795,9 @@ if not args.simulate:
     qf.create_animation(args.filename.replace(".hdf5", ".mp4"), mysim['fun'])
 
 
-""".format(os.path.basename(sim.filename), sim['prerun'])
+""".format(os.path.basename(str(sim.filename)), sim['prerun'])
     if runfilename is None:
-        runfilename = sim.filename.replace(".hdf5", "_runfile.py")
+        runfilename = str(sim.filename).replace(".hdf5", "_runfile.py")
     with open(runfilename, "w") as text_file:
         text_file.write(filestr)
     
@@ -825,7 +818,7 @@ def solve(W,
           callback=None, 
           callback_kwargs=None,
           integrator_callback=None,
-          progress_bar=True, 
+          progress_bar=None, 
           progress_file=None, 
           **kwargs):
     """
@@ -888,8 +881,9 @@ def solve(W,
     integrator_callback: callable
         Callback for integrator (called once per step), passed as its
         `callback` argument.
-    progress_bar: bool
-        Show progress bar (default: True). Requires :mod:`tqdm`.
+    progress_bar: bool or None
+        Show progress bar. None (default) means the value stored in a
+        :class:`QuSimulation` if any, and otherwise True. Requires :mod:`tqdm`.
     progress_file: TextIOWrapper or None
         File to write progress to (default: None)
     **kwargs: dict
@@ -900,21 +894,17 @@ def solve(W,
 
     Returns
     -------
-    None
-        The final state is available through `W` (for in-place integrators)
-        and the callbacks.
+    W : ndarray
+        The final state. For in-place integrators such as
+        :func:`quflow.isomp`, this is the input array `W` (when `W` is an
+        array).
 
     Raises
     ------
     ValueError
-        If neither `dt` nor `stepsize` is given, or if `endtime` is earlier
-        than the current time.
-
-    Notes
-    -----
-    If none of `steps`, `simtime` and `endtime` is given, a warning is issued
-    and the function then fails with a `TypeError`. A ``'progress_bar'``
-    argument stored in a :class:`QuSimulation` has no effect.
+        If neither `dt` nor `stepsize` is given, if none of `steps`,
+        `simtime` and `endtime` is given, or if `endtime` is earlier than the
+        current time.
     """
 
     time = 0.0 if 'time' not in kwargs else kwargs['time']
@@ -978,6 +968,10 @@ def solve(W,
                 if name not in kwargs:
                     kwargs[name] = value
 
+    # Default progress bar (if not set explicitly or in a QuSimulation)
+    if progress_bar is None:
+        progress_bar = True
+
     # Size of state matrix
     N = W.shape[-1]
 
@@ -1002,7 +996,10 @@ def solve(W,
         integrator_kwargs['callback'] = integrator_callback
 
     # Determine steps
-    if np.array([0 if x is None else 1 for x in [steps, simtime, endtime]]).sum() != 1:
+    number_of_lengths = np.array([0 if x is None else 1 for x in [steps, simtime, endtime]]).sum()
+    if number_of_lengths == 0:
+        raise ValueError("One of `steps`, `simtime`, or `endtime` must be specified.")
+    if number_of_lengths > 1:
         warnings.warn("One, and only one, of `steps`, `simtime`, or `endtime` should be specified.")
     if endtime is not None:
         if endtime < time:
@@ -1069,5 +1066,7 @@ def solve(W,
     # Close progressbar
     if progress_bar:
         pbar.close()
+
+    return W
 
 

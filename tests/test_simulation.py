@@ -251,32 +251,67 @@ def test_solve_continues_simulation(tmp_path):
     np.testing.assert_array_equal(sim[-1], sim['mat', -1])
 
 
-@pytest.mark.xfail(strict=True, reason="qutypes_iterator uses mat2shr instead of mat2shc for a complex 'fun'")
 def test_complex_fun_qutype(tmp_path):
     W0 = _state()
     sim = QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=W0, qutypes={'fun': np.complex128})
     np.testing.assert_allclose(sim['fun', 0], qf.shc2fun(qf.mat2shc(W0)), rtol=0, atol=1e-12)
 
 
-@pytest.mark.xfail(strict=True, reason="initialize_field creates but does not raise ValueError")
 def test_invalid_field_value_rejected(tmp_path):
     with pytest.raises(ValueError):
         QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=_state(), mylist=[1, 2])
 
 
-@pytest.mark.xfail(strict=True, reason="create_runfile writes the default filename without quotes")
 def test_runfile_runs(tmp_path):
+    # The generated script continues the simulation (run in the file's directory,
+    # since the default --filename is the base name of the simulation file)
     import subprocess, sys
-    sim = QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=_state())
+    W0 = _state()
+    N = W0.shape[-1]
+    sim = QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=W0)
     sim['prerun'] = "import quflow as qf"
+    sim['dt'] = 0.1*qf.hbar(N)
+    sim['steps'] = 4
+    sim['steps_out'] = 2
     qf.simulation.create_runfile(sim)
-    result = subprocess.run([sys.executable, str(tmp_path/"sim_runfile.py"), "--help"],
-                            capture_output=True, text=True, timeout=120)
+    result = subprocess.run([sys.executable, "sim_runfile.py", "--simulate"],
+                            cwd=tmp_path, capture_output=True, text=True, timeout=300)
     assert result.returncode == 0, result.stderr
+    np.testing.assert_array_equal(QuSimulation(tmp_path/"sim.hdf5")['step'], [0, 2, 4])
 
 
-@pytest.mark.xfail(strict=True, reason="solve fails with TypeError when no length is given")
 def test_solve_without_length_raises_valueerror():
-    with pytest.warns(UserWarning):
-        with pytest.raises(ValueError):
-            qf.solve(_state(), dt=0.1, progress_bar=False)
+    with pytest.raises(ValueError, match="must be specified"):
+        qf.solve(_state(), dt=0.1, progress_bar=False)
+
+
+def test_solve_returns_state():
+    W0 = _state()
+    N = W0.shape[-1]
+    W = qf.solve(W0.copy(), dt=0.1*qf.hbar(N), steps=6, steps_out=4, progress_bar=False)
+    np.testing.assert_allclose(W, qf.isomp(W0.copy(), 0.1*qf.hbar(N), 6), rtol=0, atol=1e-9)
+
+
+def test_solve_returns_state_of_non_inplace_integrator():
+    # An integrator returning a new array: the result must not be lost
+    W0 = _state()
+    N = W0.shape[-1]
+
+    def integrator(W, dt, steps=1, **kwargs):
+        return qf.isomp(W.copy(), dt, steps)
+
+    W_in = W0.copy()
+    W = qf.solve(W_in, dt=0.1*qf.hbar(N), steps=6, steps_out=3, integrator=integrator, progress_bar=False)
+    np.testing.assert_array_equal(W_in, W0)
+    np.testing.assert_allclose(W, qf.isomp(W0.copy(), 0.1*qf.hbar(N), 6), rtol=0, atol=1e-9)
+
+
+def test_solve_respects_stored_progress_bar(tmp_path, capsys):
+    W0 = _state()
+    N = W0.shape[-1]
+    sim = QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=W0)
+    sim['dt'] = 0.1*qf.hbar(N)
+    sim['steps'] = 2
+    sim['progress_bar'] = False
+    qf.solve(sim)
+    assert capsys.readouterr().err == ""
