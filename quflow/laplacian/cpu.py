@@ -170,7 +170,8 @@ def _compute_cpu_laplacian(N, bc=False, dtype=np.float64):
         Whether boundary conditions should be added to make the laplacian non-singular.
         Notice that this bc is different from the one used for sparse laplacians.
         It subtracts 0.5 from ``lap[0, 0, 0]``, which makes the operator on
-        the main diagonal (singular without it) definite.
+        the main diagonal (singular without it) definite. See
+        :func:`laplacian` for why this gives the correct Poisson solution.
     dtype: float type
 
     Returns
@@ -898,7 +899,7 @@ def _get_buffer(W):
 
 
 def laplacian(N, bc=False, dtype=np.float64):
-    """
+    r"""
     Return quantized laplacian (as a tridiagonal laplacian).
 
     The array is computed by :func:`_compute_cpu_laplacian` and cached; see
@@ -918,6 +919,66 @@ def laplacian(N, bc=False, dtype=np.float64):
     -------
     lap : ndarray(shape=(N, N, 2), dtype=float)
         The cached array (shared between calls; do not modify it).
+
+    Notes
+    -----
+    **Why the boundary condition gives the correct Poisson solution.**
+    The Laplacian acts separately on each diagonal :math:`m` of the matrix,
+    as a symmetric tridiagonal matrix. For :math:`m \neq 0` this matrix has
+    the eigenvalues :math:`-\ell(\ell+1)` for :math:`\ell = |m|, \dots, N-1`,
+    all nonzero, so it is invertible and needs no boundary condition. (The
+    boundary condition only changes ``lap[0, 0, 0]``, which belongs to the
+    main diagonal.)
+
+    On the main diagonal, write :math:`p = (P_{00}, \dots, P_{N-1,N-1})` and
+    let :math:`L` be the :math:`N\times N` tridiagonal matrix of the
+    Laplacian. Its eigenvalues are :math:`-\ell(\ell+1)` for
+    :math:`\ell = 0, \dots, N-1`, so :math:`L` is negative semidefinite, and
+    its kernel is spanned by the constant vector :math:`\mathbb 1`
+    (corresponding to the identity matrix, :math:`\Delta_N I = 0`). Since
+    :math:`L` is symmetric, its range is :math:`\mathbb 1^\perp`, the
+    vectors with zero sum. Hence :math:`L p = w` is solvable if and only if
+    :math:`\sum_k w_k = 0`, and then has a unique solution :math:`p^*` with
+    :math:`\sum_k p^*_k = 0`; this trace-free solution is the one wanted.
+
+    The boundary condition subtracts :math:`1/2` from the first diagonal
+    entry,
+
+    .. math::
+
+        L_{bc} = L - \tfrac12\, e_0 e_0^T .
+
+    1. :math:`L_{bc}` is negative definite, hence invertible: for
+       :math:`x \neq 0`, :math:`x^T L_{bc}\, x = x^T L x - \tfrac12 x_0^2`.
+       Both terms are :math:`\le 0`. The first vanishes only for
+       :math:`x = c\,\mathbb 1` with :math:`c \neq 0`, and then
+       :math:`x_0 = c \neq 0`, so the second term is negative.
+    2. Let :math:`w` have zero sum and let :math:`p^*` be the trace-free
+       solution of :math:`L p = w`. The vector
+       :math:`q = p^* - p^*_0\,\mathbb 1` has :math:`q_0 = 0` and
+       :math:`L q = L p^* = w`, hence
+
+       .. math::
+
+           L_{bc}\, q = L q - \tfrac12 e_0\, q_0 = w .
+
+       Since :math:`L_{bc}` is invertible, :math:`q` is *the* solution of
+       :math:`L_{bc}\, q = w`.
+    3. Removing the mean of :math:`q` recovers :math:`p^*`, since
+       :math:`\sum_k p^*_k = 0`:
+       :math:`q - \tfrac1N \big(\sum_k q_k\big)\mathbb 1 = p^*`.
+
+    :func:`solve_poisson` follows exactly these steps on the main diagonal:
+    it replaces :math:`W` by :math:`W - \tfrac{\operatorname{tr} W}{N} I`
+    (so that :math:`w` has zero sum), solves with :math:`L_{bc}` (the Thomas
+    algorithm, which is stable for this definite matrix), and removes the
+    trace of the result. Hence it returns the unique trace-free :math:`P`
+    with :math:`\Delta_N P = W - \tfrac{\operatorname{tr} W}{N} I`.
+
+    The value :math:`1/2` is not essential: steps 2 and 3 hold for any
+    modification :math:`L - c\, e_0 e_0^T` that is invertible, and
+    :math:`c > 0` guarantees this by step 1. The smallest eigenvalue of
+    :math:`L_{bc}` in absolute value is about :math:`1/(2N)`.
     """
     global _cpu_laplacian_cache
 
