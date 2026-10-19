@@ -3,7 +3,7 @@ Installation
 
 From the repository::
 
-   git clone https://github.com/kmodin/quflow.git
+   git clone https://github.com/klasmodin/quflow.git
    cd quflow
    pip install .
 

@@ -33,10 +33,12 @@ making the approach suitable for long-time simulations.
 
 The package may be installed directly from the repository:
 ```
-git clone https://github.com/kmodin/quflow.git
+git clone https://github.com/klasmodin/quflow.git
 cd quflow
 pip install .
 ```
+Optional extras: `pip install ".[test]"` for running the tests, `".[docs]"` for building
+the documentation, and `".[maps]"` for map projections in plots.
 
 Alternatively, it can be installed via the included `conda` environment
 description file `quflow-env.yaml`. A new conda environment named `quflow`
@@ -58,11 +60,11 @@ conda install -n quflow "libblas=*=*mkl"
 
 ### Dependencies
 
-Required: `numpy`, `scipy`, `numba`, `ducc0`, `h5py`, `appdirs`, `matplotlib`.
+Required (installed by `pip install .`): `numpy`, `scipy`, `numba`, `ducc0`, `h5py`, `appdirs`,
+`matplotlib`, `tqdm` (progress bars).
 
 Optional:
 
-- `tqdm`: progress bars during simulations;
 - `cartopy`: map projections in plots;
 - `ffmpeg`: animations;
 - `pyssht`: alternative backend for the spherical-harmonic transforms;
