@@ -138,9 +138,6 @@ python -m pytest
 
 ## References
 
-A good entry point for learning about matrix hydrodynamics is [5].
-If you use quflow in your work, please cite the papers it is based on, [1]–[4].
-
 1. K. Modin and M. Viviani. *Lie–Poisson methods for isospectral flows*,
    Found. Comput. Math., 20:889–921, 2020.
    [doi:10.1007/s10208-019-09428-w](https://doi.org/10.1007/s10208-019-09428-w)
@@ -156,6 +153,9 @@ If you use quflow in your work, please cite the papers it is based on, [1]–[4]
 5. K. Modin and M. Viviani. *A brief introduction to matrix hydrodynamics*,
    J. Comput. Dyn., 14:17–35, 2026.
    [doi:10.3934/jcd.2026001](https://doi.org/10.3934/jcd.2026001)
+
+A good entry point for learning about matrix hydrodynamics is [5].
+If you use `quflow` in your work, please cite at least one of the papers.
 
 <details>
 <summary>BibTeX</summary>
