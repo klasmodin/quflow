@@ -4,14 +4,6 @@ A Python module for quantized vorticity flows.
 The code is based on a paper by Modin and Viviani (2020) [1] 
 where a quantized Euler equation on the sphere is presented.
 
-## Spherical coordinates
-
-We use the following convention for spherical coordinates:
-
-![](https://upload.wikimedia.org/wikipedia/commons/4/4f/3D_Spherical.svg)
-
-Here, $\theta \in [0,\pi]$ is the *inclination* and $\phi \in [0,2\pi)$ is the *azimuth*.
-
 ## Dependencies
 
 Required:
