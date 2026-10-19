@@ -1,3 +1,24 @@
+"""
+Running simulations and storing them in HDF5 files.
+
+:func:`solve` advances a vorticity matrix in time with an integrator (by
+default :func:`quflow.isomp`) and calls callbacks at regular output times.
+:class:`QuSimulation` is such a callback: it stores the states, in several
+representations, together with time, step counts and logged quantities, in
+an HDF5 file. It also stores the arguments of :func:`solve`, so that a
+simulation can be continued with ``qf.solve(sim)``, also on another computer
+(see :func:`create_runfile`).
+
+Typical use::
+
+    sim = qf.QuSimulation("mysim.hdf5", overwrite=True, state=W0,
+                          loggers={'energy': qf.energy_euler})
+    sim['dt'] = 0.1*qf.hbar(N)
+    sim['simtime'] = 10.0
+    sim['dt_out'] = 0.5
+    qf.solve(sim)
+    sim['fun', -1]   # last state as function values
+"""
 import numpy as np
 import os
 import os.path
@@ -22,6 +43,15 @@ import warnings
 # Helper functions
 # ----------------
 def in_notebook():
+    """
+    Return True if running in a Jupyter (IPython kernel) notebook.
+
+    Used to choose the notebook version of the progress bar.
+
+    Returns
+    -------
+    bool
+    """
     try:
         from IPython import get_ipython
         if 'IPKernelApp' not in get_ipython().config:  # pragma: no cover
@@ -53,27 +83,93 @@ class QuSimulation(object):
     The data may be stored in either of the following formats
     (specified by a string referred to as `qutype`):
 
-    'mat'
-    Vorticity matrix.
-    shape = (..., N, N)
-    dtype = complex
+    ``'mat'``
+        Vorticity matrix, shape ``(..., N, N)``, complex.
+    ``'shr'``
+        Real spherical harmonics (:func:`quflow.mat2shr`), shape
+        ``(..., N**2)``, real.
+    ``'shc'``
+        Complex spherical harmonics (:func:`quflow.mat2shc`), shape
+        ``(..., N**2)``, complex.
+    ``'fun'``
+        Function values on the grid of :func:`quflow.sphgrid`, shape
+        ``(..., N, 2*N-1)``, computed with the Berezin multipliers (the
+        default of :func:`quflow.shr2fun`). Real or complex depending on the
+        dtype.
+    ``'funL2'``
+        As ``'fun'``, but without the Berezin multipliers.
+    ``'funhalf'``, ``'funL2half'``
+        As ``'fun'`` and ``'funL2'``, but from the coefficients with
+        ``el < N//2`` only, on the grid of size ``(N//2, 2*(N//2)-1)``.
+        Stored under the names ``'fun'`` and ``'funL2'``.
 
-    'shr'
-    Real spherical harmonics.
-    shape = (..., N**2)
-    dtype = real
+    The leading ``...`` dimensions are those of a stacked state. Notice that
+    the same object can hold data for several `qutype`.
 
-    'shc'
-    Spherical harmonics
-    shape = (..., N**2)
-    dtype = complex
+    The file contains one dataset per stored field, with the time index as
+    first dimension: one per qutype, ``'time'``, ``'step'``, one per logger,
+    the solver statistics ``'tol_auto'``, ``'iterations'`` and
+    ``'number_of_maxit'``, and any extra fields given at creation. Arguments
+    for :func:`solve` set with ``sim[name] = value`` are stored as attributes
+    of the group ``<datapath>args/``.
 
-    'fun'
-    Function values in spherical coordinates
-    shape = (..., 2*N, N)
-    dtype = real or complex
+    Parameters
+    ----------
+    filename : str
+        Name of the HDF5 file.
+    qutypes : dict, optional
+        Representations to store, as a dict ``{qutype: dtype}``; a dtype of
+        None means the dtype of the state. Default is
+        ``{'mat': None, 'fun': np.float32, 'funL2': np.float32}``. Only for a
+        new file.
+    datapath : str, optional
+        HDF5 group to store the simulation in; must end with ``"/"``.
+        Default is ``"/"``.
+    overwrite : bool, optional
+        Whether to overwrite an existing file. Default is False: an existing
+        file is opened and continued.
+    loggers : dict, optional
+        Functions ``{name: logger}``, where ``logger(W)`` returns a scalar or
+        array that is stored at every output time (e.g.
+        ``{'energy': qf.energy_euler}``). The loggers are pickled in the file;
+        those that cannot be pickled (e.g. local functions) must be passed
+        again when reopening the file.
+    state : ndarray, shape (N, N) or (k, N, N), complex, optional
+        Initial state. Required for a new file; not allowed for an existing
+        one.
+    time : float, optional
+        Initial time. Default is 0.0.
+    **kwargs
+        Extra fields to store at every output time, with their initial
+        values (scalars or arrays).
 
-    Notice that the same object can hold data for several `qutype`.
+    Raises
+    ------
+    ValueError
+        If `datapath` does not end with ``"/"``, if `state` is missing for a
+        new file, if `state` or `qutypes` are given for an existing file, or
+        if both a full and a half version of the same function output are
+        requested.
+
+    Notes
+    -----
+    The file is opened only for the duration of each operation.
+
+    Examples
+    --------
+    >>> import os, tempfile
+    >>> import numpy as np
+    >>> import quflow as qf
+    >>> N = 8
+    >>> W0 = qf.shr2mat(np.r_[0.0, np.random.default_rng(0).standard_normal(N**2 - 1)])
+    >>> filename = os.path.join(tempfile.mkdtemp(), "example.hdf5")
+    >>> sim = qf.QuSimulation(filename, state=W0, loggers={'energy': qf.energy_euler})
+    >>> sim['dt'] = 0.1*qf.hbar(N)
+    >>> sim['steps'] = 10
+    >>> sim['dt_out'] = 0.5*qf.hbar(N)
+    >>> qf.solve(sim, progress_bar=False)
+    >>> sim['time'].shape, sim['fun'].shape
+    ((3,), (3, 8, 15))
     """
 
     def __init__(self,
@@ -86,19 +182,20 @@ class QuSimulation(object):
                  time=None,
                  **kwargs): 
         """
+        Create a new simulation file, or open an existing one.
 
-        # v [m/s]
-        # omega = curl v = [1/s]
-        # psi = Delta^{-1}omega = [m^2/s]
-        # energy = omega psi dx = [m^4/s^2]
-        # enstrophy = omega^2 dx = [m^2/s^2]
-        # sqrt{energy}/enstrophy = [s]
+        See the class docstring for the parameters.
 
-        Parameters
-        ----------
-        filename
-        filemode
-        qtype
+        Notes
+        -----
+        Physical units, for reference:
+
+        * velocity v [m/s]
+        * vorticity omega = curl v [1/s]
+        * stream function psi = Delta^{-1} omega [m^2/s]
+        * energy = integral of omega*psi [m^4/s^2]
+        * enstrophy = integral of omega^2 [m^2/s^2]
+        * sqrt(energy)/enstrophy [s]
         """
         from . import __version__
 
@@ -195,11 +292,17 @@ class QuSimulation(object):
 
 
     def __enter__(self):
+        """
+        Open the file for reading, for use in a ``with`` block.
+
+        Note that most methods close the file when they finish.
+        """
         self._open("r")
         return self
 
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """Close the file; exceptions are printed and propagated."""
         self._close()
         if exc_type:
             print(f'Exception type: {exc_type}')
@@ -209,6 +312,29 @@ class QuSimulation(object):
 
 
     def __setitem__(self, name, value):
+        """
+        Store an argument for :func:`solve` (or other metadata) in the file.
+
+        * ``'hamiltonian'``, ``'forcing'``, ``'integrator'``, ``'callback'``,
+          ``'integrator_callback'``, ``'strang_splitting'`` and
+          ``'qutypes'`` are pickled. Functions are pickled by reference
+          (module and name); functions that cannot be pickled (e.g. local
+          functions or lambdas) are stored by name only (see
+          :meth:`__getitem__`).
+        * ``'prerun'`` is a string of Python code (e.g. definitions of the
+          functions above), used by :func:`create_runfile`. It is stored,
+          not executed.
+        * ``'info'`` is stored as an attribute of the simulation group.
+        * Anything else (e.g. ``'dt'``, ``'simtime'``, ``'dt_out'``,
+          ``'tol'``) is stored as an attribute of the ``args`` group.
+
+        Setting a value to None removes it.
+
+        Parameters
+        ----------
+        name : str
+        value : object
+        """
         try:
             f = self._open("r+")
         # with h5py.File(self.filename, "r+") as f:
@@ -242,6 +368,24 @@ class QuSimulation(object):
             self._close()
 
     def __getitem__(self, name):
+        """
+        Return stored data: a dataset, an argument, or an attribute.
+
+        ``sim[name]`` returns the whole dataset `name` (e.g. ``'time'``,
+        ``'fun'``, a logger) as an array, or a stored argument or attribute.
+        ``sim[name, index]`` returns part of a dataset, e.g.
+        ``sim['mat', -1]`` (the last state) or ``sim['fun', :, 0]``.
+        ``sim[index]`` is short for ``sim['mat', index]``.
+
+        Functions stored by name only (see :meth:`__setitem__`) are evaluated
+        by name in the namespace of :mod:`quflow.simulation`, which only works
+        for names available there (such as ``solve_poisson`` and ``isomp``).
+
+        Raises
+        ------
+        KeyError
+            If there is no such dataset, argument or attribute.
+        """
         ind = None
         if isinstance(name, tuple):
             if isinstance(name[0], str):
@@ -284,6 +428,13 @@ class QuSimulation(object):
         return value
     
     def args(self):
+        """
+        Iterate over the stored arguments for :func:`solve`.
+
+        Yields
+        ------
+        (name, value) : tuple
+        """
         try:
             f = self._open("r")
         # with h5py.File(self.filename, 'r') as f:
@@ -293,6 +444,30 @@ class QuSimulation(object):
             self._close()
 
     def qutypes_iterator(self, W, qutype2varname=None):
+        """
+        Convert a state to each stored representation.
+
+        Parameters
+        ----------
+        W : ndarray, shape (N, N) or (k, N, N), complex
+            State.
+        qutype2varname : dict, optional
+            Dataset name for each qutype. Default maps ``'funhalf'`` and
+            ``'funL2half'`` to ``'fun'`` and ``'funL2'``, and other qutypes
+            to themselves.
+
+        Yields
+        ------
+        (varname, arr, qutype) : tuple
+            Dataset name, converted data and qutype.
+
+        Notes
+        -----
+        A complex function output (``'fun'`` with a complex dtype) is only
+        computed correctly if ``'shc'`` comes before it in `qutypes`;
+        otherwise real coefficients (:func:`quflow.mat2shr`) are transformed
+        as complex ones.
+        """
         N = W.shape[-1]
         if qutype2varname is None:
             qutype2varname = _default_qutype2varname
@@ -352,6 +527,7 @@ class QuSimulation(object):
             yield qutype2varname[qutype], arr, qutype
 
     def _update_fieldnames(self):
+        """Update ``self.fieldnames``, a dict ``{name: (shape, dtype)}`` of the datasets."""
         try:
             f = self._open("r")
         # with h5py.File(self.filename, 'r') as f:
@@ -363,6 +539,28 @@ class QuSimulation(object):
             self._close()
 
     def initialize_field(self, W, time=0.0, **kwargs):
+        """
+        Create the datasets of a new simulation file, with the initial values.
+
+        Called by the constructor for a new file.
+
+        Parameters
+        ----------
+        W : ndarray, shape (N, N) or (k, N, N), complex, or None
+            Initial state. If None, no state datasets are created.
+        time : float, optional
+            Initial time. Default is 0.0.
+        **kwargs
+            Extra fields and their initial values, which must be scalars or
+            numpy arrays. Values of other types are not rejected, but give
+            wrong data. The fields ``'tol_auto'``, ``'iterations'`` and
+            ``'number_of_maxit'`` are always created (initially 0.0).
+
+        Raises
+        ------
+        ValueError
+            If an extra field is named ``'time'`` or ``'step'``.
+        """
         try:
             f = self._open("r+")
         #     f = h5py.File(self.filename, "r+")
@@ -440,12 +638,21 @@ class QuSimulation(object):
 
     def __call__(self, W, delta_time, delta_steps=1, **kwargs):
         """
+        Append a state to the file (the callback interface of :func:`solve`).
+
+        Stores `W` in each qutype, the time and step count (incremented by
+        `delta_time` and `delta_steps`), the values of the loggers, and the
+        values in `kwargs` for which a dataset exists (e.g. the solver
+        statistics); other keyword arguments are ignored.
 
         Parameters
         ----------
-        W: ndarray
+        W: ndarray, shape (N, N) or (k, N, N), complex
+            State.
         delta_time: float
+            Time since the previous stored state.
         delta_steps: int
+            Number of steps since the previous stored state. Default is 1.
         kwargs: other variables to save
         """
         try:
@@ -494,13 +701,30 @@ def create_runfile(sim, runfilename: str = None):
     """
     Create cluster runfile from QuSimulation object.
 
+    Writes a Python script that loads the simulation file and continues it
+    with ``qf.solve``, and then creates an animation of the ``'fun'`` data.
+    The code stored under ``sim['prerun']`` is inserted near the top of the
+    script, so that functions it defines (e.g. a custom Hamiltonian) are
+    available when the stored arguments are unpickled. The script accepts
+    command line options ``--filename``, ``--simtime``, ``--tol``,
+    ``--compsum``, ``--animate`` (only animate) and ``--simulate`` (only
+    simulate), and uses the CUDA implementation if :mod:`cupy` and a GPU are
+    available.
+
     Parameters
     ----------
     sim: QuSimulation or str
-        If str, interpret as filename of QuSimulation file.
+        If str, interpret as filename of QuSimulation file. The simulation
+        must have a ``'prerun'`` entry.
     runfilename: str
         Name of output file. Should end with .py. Default is to
-        base the name of the simfile name.
+        base the name of the simfile name (``<name>_runfile.py``).
+
+    Notes
+    -----
+    In the generated script, the default value of ``--filename`` is the
+    file name without quotes, so the script fails with a `NameError` when
+    run; and the GPU branch refers to an undefined name ``complex_type``.
     """
     if not isinstance(sim, QuSimulation):
         if isinstance(sim, str):
@@ -607,10 +831,23 @@ def solve(W,
     """
     High-level solve function.
 
+    Advances `W` by repeated calls of `integrator`, in chunks of
+    `steps_out` steps, and calls the callbacks after each chunk.
+
+    If `W` is a :class:`QuSimulation`, the simulation is continued from its
+    last stored state and time, the simulation object is added to the
+    callbacks, and the arguments stored in it (``sim[name] = value``) are
+    used for the parameters not given explicitly. Stored arguments not
+    listed below (e.g. ``'hamiltonian'``, ``'forcing'``, ``'tol'``) are
+    passed to the integrator. A stored ``'callback'`` is used as
+    `integrator_callback`; the deprecated names ``'inner_steps'`` and
+    ``'inner_time'`` are accepted for `steps_out` and `dt_out`.
+
     Parameters
     ----------
-    W: ndarray(shape=(N, N) or (k, N, N), dtype=complex)
-        Initial vorticity matrix.
+    W: ndarray(shape=(N, N) or (k, N, N), dtype=complex) or QuSimulation
+        Initial vorticity matrix (updated in place by in-place integrators
+        such as :func:`quflow.isomp`), or a simulation to continue.
     dt: None or float
         Time step in seconds.
     stepsize: None or float
@@ -619,41 +856,65 @@ def solve(W,
         Not used when `dt` is specified.
     steps: None or int
         Total number of steps to take.
-        Only one of `steps`, `simtime`, or `endtime` should be specified.
+        Only one of `steps`, `simtime`, or `endtime` should be specified
+        (a warning is issued otherwise). If several are given, `endtime`
+        takes precedence over `simtime`, which takes precedence over `steps`.
     simtime: None or float
-        Total simulation time in seconds.
+        Total simulation time in seconds. The number of steps is
+        ``round(simtime/dt)``.
         Only one of `steps`, `simtime`, or `endtime` should be specified.
     endtime: None or float
         End simulation time in seconds.
         Only one of `steps`, `simtime`, or `endtime` should be specified.
-    inner_steps: None or int
-        Number of steps taken between each callback.
-        Deprecated: use `steps_out` instead.
     steps_out: None or int
-        Number of steps taken between each callback.
-    inner_time: None or float
-        Approximate time in seconds between each callback.
-        Not used when `inner_steps` is specified.
-        Deprecated: use `dt_out` instead.
+        Number of steps taken between each callback. Default is 100 (and at
+        most `steps`).
     dt_out: None or float
-        Approximate time in seconds between each callback.
+        Approximate time in seconds between each callback; ``steps_out =
+        round(dt_out/dt)``.
         Not used when `steps_out` is specified.
-    integrator: callable(W, stepsize, steps, **kwargs)
-        Integration method to carry out the steps.
-    callback: callable(W, steps_out, dt_out, **callback_kwargs)
-        The callback function evaluated every outer step.
-        It uses **callback_kwargs as extra keyword arguments.
-        It is not evaluated at the initial time.
+    integrator: callable(W, dt, steps, **kwargs)
+        Integration method to carry out the steps. Default is
+        :func:`quflow.isomp`. If it accepts an argument ``stats``, the
+        statistics it reports are passed on to the callbacks.
+    callback: callable or tuple of callables
+        Called as ``callback(W, delta_time=..., delta_steps=...,
+        **callback_kwargs)`` after every chunk of steps (as
+        :meth:`QuSimulation.__call__`). It is not evaluated at the initial
+        time.
     callback_kwargs: dict
         Extra keyword arguments to send to callback at each output step.
+        The integrator statistics are added to it.
     integrator_callback: callable
-        Callback for integrator (called once per step).
+        Callback for integrator (called once per step), passed as its
+        `callback` argument.
     progress_bar: bool
-        Show progress bar (default: True)
+        Show progress bar (default: True). Requires :mod:`tqdm`.
     progress_file: TextIOWrapper or None
         File to write progress to (default: None)
     **kwargs: dict
-        Extra keyword arguments to send to integrator at each step.
+        Extra keyword arguments to send to integrator at each step, e.g.
+        ``hamiltonian`` (default :func:`quflow.solve_poisson`), ``forcing``
+        or ``tol``. The argument ``time`` sets the initial time (default 0.0)
+        and is passed to the integrator, advanced after each chunk.
+
+    Returns
+    -------
+    None
+        The final state is available through `W` (for in-place integrators)
+        and the callbacks.
+
+    Raises
+    ------
+    ValueError
+        If neither `dt` nor `stepsize` is given, or if `endtime` is earlier
+        than the current time.
+
+    Notes
+    -----
+    If none of `steps`, `simtime` and `endtime` is given, a warning is issued
+    and the function then fails with a `TypeError`. A ``'progress_bar'``
+    argument stored in a :class:`QuSimulation` has no effect.
     """
 
     time = 0.0 if 'time' not in kwargs else kwargs['time']

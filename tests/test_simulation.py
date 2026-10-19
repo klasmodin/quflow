@@ -197,3 +197,86 @@ def test_unpicklable_hamiltonian_stored_by_name(tmp_path):
     sim['hamiltonian'] = myham
     with h5py.File(filename, "r") as f:
         assert f[sim.args_datapath].attrs['hamiltonian'] == 'myham'
+
+
+# --- Documented behaviour ---------------------------------------------------------
+
+def _state(N=8, seed=0):
+    rng = np.random.default_rng(seed)
+    return qf.shr2mat(np.r_[0.0, rng.standard_normal(N**2 - 1)], N=N)
+
+
+def test_default_qutypes(tmp_path):
+    W0 = _state()
+    sim = QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=W0)
+    omega = qf.mat2shr(W0)
+    np.testing.assert_allclose(sim['fun', 0], qf.shr2fun(omega).astype(np.float32), rtol=0, atol=1e-6)
+    np.testing.assert_allclose(sim['funL2', 0], qf.shr2fun(omega, berezin=False).astype(np.float32), rtol=0, atol=1e-6)
+    np.testing.assert_array_equal(sim['mat', 0], W0)
+    assert sim['fun'].shape == (1, 8, 15)
+
+
+def test_funhalf_qutype(tmp_path):
+    sim = QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=_state(), qutypes={'funhalf': np.float32})
+    assert sim['fun'].shape == (1, 4, 7)
+
+
+def test_solve_length_precedence():
+    W0 = _state()
+    counts = []
+
+    def count(W, delta_time, delta_steps, **kwargs):
+        counts.append(delta_steps)
+
+    with pytest.warns(UserWarning, match="One, and only one"):
+        qf.solve(W0.copy(), dt=0.1, steps=5, simtime=1.0, steps_out=3, callback=count, progress_bar=False)
+    assert counts == [3, 3, 3, 1]   # simtime wins: round(1.0/0.1) = 10 steps
+
+
+def test_solve_continues_simulation(tmp_path):
+    W0 = _state()
+    N = W0.shape[-1]
+    sim = QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=W0)
+    sim['dt'] = 0.1*qf.hbar(N)
+    sim['steps'] = 10
+    sim['dt_out'] = 0.5*qf.hbar(N)
+    qf.solve(sim, progress_bar=False)
+    np.testing.assert_allclose(sim['time'], [0.0, 0.5*qf.hbar(N), qf.hbar(N)], rtol=1e-12)
+    np.testing.assert_array_equal(sim['step'], [0, 5, 10])
+    # Same result as a direct integration, up to the fixed-point iteration
+    # tolerance (solve calls isomp twice with 5 steps; each call restarts the
+    # iteration from scratch)
+    W = qf.isomp(W0.copy(), 0.1*qf.hbar(N), 10)
+    np.testing.assert_allclose(sim['mat', -1], W, rtol=0, atol=1e-9)
+    np.testing.assert_array_equal(sim[-1], sim['mat', -1])
+
+
+@pytest.mark.xfail(strict=True, reason="qutypes_iterator uses mat2shr instead of mat2shc for a complex 'fun'")
+def test_complex_fun_qutype(tmp_path):
+    W0 = _state()
+    sim = QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=W0, qutypes={'fun': np.complex128})
+    np.testing.assert_allclose(sim['fun', 0], qf.shc2fun(qf.mat2shc(W0)), rtol=0, atol=1e-12)
+
+
+@pytest.mark.xfail(strict=True, reason="initialize_field creates but does not raise ValueError")
+def test_invalid_field_value_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=_state(), mylist=[1, 2])
+
+
+@pytest.mark.xfail(strict=True, reason="create_runfile writes the default filename without quotes")
+def test_runfile_runs(tmp_path):
+    import subprocess, sys
+    sim = QuSimulation(tmp_path/"sim.hdf5", overwrite=True, state=_state())
+    sim['prerun'] = "import quflow as qf"
+    qf.simulation.create_runfile(sim)
+    result = subprocess.run([sys.executable, str(tmp_path/"sim_runfile.py"), "--help"],
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.xfail(strict=True, reason="solve fails with TypeError when no length is given")
+def test_solve_without_length_raises_valueerror():
+    with pytest.warns(UserWarning):
+        with pytest.raises(ValueError):
+            qf.solve(_state(), dt=0.1, progress_bar=False)
