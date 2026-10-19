@@ -15,4 +15,4 @@ from . import dynamics
 from . import physics
 from .physics import inner_H1, inner_Hm1, energy_euler, enstrophy
 
-__version__ = '0.1.0'
+__version__ = '0.2.0'
