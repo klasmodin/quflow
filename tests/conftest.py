@@ -1,6 +1,31 @@
 """Shared pytest fixtures for the quflow test suite."""
+import zlib
+
 import numpy as np
 import pytest
+
+
+def _stable_seed(name):
+    """Seed derived from a name, the same in every run (unlike ``hash``)."""
+    return zlib.crc32(name.encode())
+
+
+def pytest_collectstart(collector):
+    """
+    Seed numpy's global random generator before each test module is imported.
+
+    Some test modules create random test data at import time (e.g. in
+    ``pytest.mark.parametrize``); this makes that data the same in every run,
+    and independent of which other test files are collected.
+    """
+    if isinstance(collector, pytest.Module):
+        np.random.seed(_stable_seed(collector.nodeid))
+
+
+@pytest.fixture(autouse=True)
+def _seed_global_rng(request):
+    """Seed numpy's global random generator before each test, from its name."""
+    np.random.seed(_stable_seed(request.node.nodeid))
 
 
 def _cupy_available():
