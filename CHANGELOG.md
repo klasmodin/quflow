@@ -3,6 +3,7 @@
 ## [0.2.0] - 2026-10-20
 
 ### Changed
+For this version, Claude LLM was used to create documentation and to add better test coverage.
 Changes that can affect results or existing scripts:
 - `solve` now returns the final state. Note that in Jupyter, a cell ending in
   `qf.solve(sim)` now displays the returned matrix; end the line with `;` or assign the result.
